@@ -262,16 +262,21 @@ function codexParentThreadId(meta: JsonRecord): string | null {
     || null;
 }
 
+// Legacy guardian threads surface as records from the internal auto-review
+// model rather than as explicit subagent metadata.
+const CODEX_AUTO_REVIEW_MODEL = 'codex-auto-review';
+
 function codexIsGuardianThread(meta: JsonRecord, records: CodexLineRecord[] = []): boolean {
   const subagent = meta?.source?.subagent;
   if (subagent?.other === 'guardian') return true;
   if (meta?.thread_source !== 'subagent') return false;
-  return records.some(({ obj }) => obj?.payload?.model === 'codex-auto-review' || obj?.model === 'codex-auto-review');
+  return records.some(({ obj }) => obj?.payload?.model === CODEX_AUTO_REVIEW_MODEL || obj?.model === CODEX_AUTO_REVIEW_MODEL);
 }
 
 function readCodexGuardianThreadInfo(filePath: string): { threadRawId: string; lineNum: number } | null {
-  const records: CodexLineRecord[] = [];
   let metaRecord: CodexLineRecord | null = null;
+  let sawAutoReviewModel = false;
+  let guardian = false;
   let lineNum = 0;
   readLines(filePath, (line) => {
     lineNum++;
@@ -281,17 +286,24 @@ function readCodexGuardianThreadInfo(filePath: string): { threadRawId: string; l
     } catch {
       return;
     }
-    records.push({ lineNum, obj });
+    sawAutoReviewModel ||= obj?.payload?.model === CODEX_AUTO_REVIEW_MODEL
+      || obj?.model === CODEX_AUTO_REVIEW_MODEL;
     if (obj?.type === 'session_meta' && obj.payload?.id) {
       metaRecord = { lineNum, obj };
-      if (obj.payload?.source?.subagent?.other === 'guardian') return false;
+      if (obj.payload?.source?.subagent?.other === 'guardian') {
+        guardian = true;
+        return false;
+      }
       if (obj.payload?.thread_source !== 'subagent') return false;
     }
-    if (metaRecord && codexIsGuardianThread(metaRecord.obj.payload, records)) return false;
+    if (metaRecord && sawAutoReviewModel) {
+      guardian = true;
+      return false;
+    }
   });
   const capturedMeta = metaRecord as CodexLineRecord | null;
   const meta = capturedMeta?.obj?.payload;
-  if (!meta || !codexIsGuardianThread(meta, records)) return null;
+  if (!meta || !guardian) return null;
   const threadRawId = codexRawId(meta.id);
   return threadRawId ? { threadRawId, lineNum } : null;
 }
