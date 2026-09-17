@@ -8,6 +8,7 @@ import { isAbsolute, normalize, resolve, sep } from 'node:path';
 import { constants as sqliteConstants } from 'node:sqlite';
 import { storedSessionCursor } from './provider-indexing.ts';
 import { createBuiltinProviderRegistry } from './providers/builtins.ts';
+import { openCopilotChronicleWithNodeSqlite } from './providers/copilot-node.ts';
 import type { ProviderRegistry } from './providers/registry.ts';
 import type { SqliteDb, SqliteRow, SqliteStatement } from './sqlite-types.ts';
 
@@ -267,7 +268,9 @@ function buildSafeFtsQuery(text: unknown): string {
 function createQueryApi(
   db: SqliteDb,
   {
-    providerRegistry = createBuiltinProviderRegistry(),
+    providerRegistry = createBuiltinProviderRegistry({}, {
+      openCopilotChronicle: openCopilotChronicleWithNodeSqlite,
+    }),
     invokingSessionId = null,
   }: { providerRegistry?: ProviderRegistry; invokingSessionId?: string | null } = {},
 ) {

@@ -27,6 +27,7 @@ import {
 } from './provider-settings.ts';
 import { coreSchemaNeedsMigration } from './schema-migrations.ts';
 import type { ProviderRegistry } from './providers/registry.ts';
+import { openCopilotChronicleWithNodeSqlite } from './providers/copilot-node.ts';
 import type { NodeSqliteDb, SqliteDb } from './sqlite-types.ts';
 
 interface SkippedFile {
@@ -192,7 +193,9 @@ function buildIndex({ force = false, ignoreRecentBuild = false, ignoreDaemonOwne
       if (!settings.ok) {
         return { skip: true, reason: 'settings_unavailable', error: settings.error };
       }
-      registry = createConfiguredBuiltinProviderRuntime(settings.settings).registry;
+      registry = createConfiguredBuiltinProviderRuntime(settings.settings, {
+        openCopilotChronicle: openCopilotChronicleWithNodeSqlite,
+      }).registry;
     }
 
     const db = openDb();

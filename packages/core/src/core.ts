@@ -21,6 +21,7 @@ import {
   readPersistedProviderSettings,
 } from './provider-settings.ts';
 import type { ProviderRegistry } from './providers/registry.ts';
+import { openCopilotChronicleWithNodeSqlite } from './providers/copilot-node.ts';
 import { createQueryApi, createAttuneApi } from './query.ts';
 import type { SqliteDb } from './sqlite-types.ts';
 import { nodeSqliteTransactionAdapter } from './tx.ts';
@@ -69,7 +70,9 @@ function reportIncompleteInventory(build: unknown): void {
 
 function refreshQueryIndex(): ProviderRegistry {
   const settings = readPersistedProviderSettings();
-  const providerRegistry = createConfiguredBuiltinProviderRuntime(settings.settings).registry;
+  const providerRegistry = createConfiguredBuiltinProviderRuntime(settings.settings, {
+    openCopilotChronicle: openCopilotChronicleWithNodeSqlite,
+  }).registry;
   if (!settings.ok) {
     const schema = ensureReadableSchema();
     if (!schema.ready) {
