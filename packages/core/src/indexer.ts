@@ -56,6 +56,11 @@ interface BuildIndexOptions {
   // imply this; the carve-out is always explicit (ADR 0006 amendment).
   ignoreDaemonOwnership?: boolean;
   providerRegistry?: ProviderRegistry;
+  // 'strict' disables cooperative append: a full-inventory refresh that acts
+  // as its caller's reconciliation verifies prefixes instead of trusting
+  // append-only growth (RFC #172). Defaults to 'normal'; force builds are
+  // readMode-independent because they replay every unit from a null cursor.
+  readMode?: 'normal' | 'strict';
 }
 
 function errorMessage(error: unknown): string {
@@ -175,7 +180,7 @@ function ensureReadableSchema(): { ready: boolean; reason?: string } {
   }
 }
 
-function buildIndex({ force = false, ignoreRecentBuild = false, ignoreDaemonOwnership = false, providerRegistry }: BuildIndexOptions = {}) {
+function buildIndex({ force = false, ignoreRecentBuild = false, ignoreDaemonOwnership = false, providerRegistry, readMode = 'normal' }: BuildIndexOptions = {}) {
   const ownership = inspectBuildOwnership({ force, ignoreRecentBuild, ignoreDaemonOwnership });
   if (ownership.skip) return ownership;
   const lease = acquireWriterLease({
@@ -202,7 +207,7 @@ function buildIndex({ force = false, ignoreRecentBuild = false, ignoreDaemonOwne
     const txDb = nodeSqliteTransactionAdapter(db);
     const skippedFiles: SkippedFile[] = [];
     try {
-      const providerPlan = createProviderIndexPlan(db, registry, { force });
+      const providerPlan = createProviderIndexPlan(db, registry, { force, readMode });
       const incompleteProviders = [...providerPlan.incompleteProviders].sort();
       const inventoryIssues = [...providerPlan.inventoryIssues];
       if (force && incompleteProviders.length > 0) {
