@@ -13,6 +13,7 @@ import { createAdaptiveWatcher } from '../../../packages/adaptive-watcher/src/in
 import { createWorkerBuildIndex } from './indexer-worker-client.ts';
 import { buildRecapExportQuery } from './recap-capture-query.ts';
 import { buildEditorUrl, DEFAULT_EDITOR_SCHEME, EDITOR_SCHEMES, resolveFileReference } from './file-reference.ts';
+import { createDeferredQuit } from './quit-teardown.ts';
 import { acquireWriterLease, writerLockPathFor } from '../../../packages/core/src/writer-lease.ts';
 import { migrateCoreSchemaColumns } from '../../../packages/core/src/schema-migrations.ts';
 import { storedSessionCursor } from '../../../packages/core/src/provider-indexing.ts';
@@ -334,18 +335,26 @@ async function stopIndexerServiceAndWait({ waitForIdle = true } = {}) {
 }
 
 async function stopBackgroundResources({ stopWorker = false } = {}) {
-  await stopIndexerServiceAndWait();
-  if (stopWorker && indexerWorker) {
-    indexerWorker.stop();
-    indexerWorker = null;
-  }
+  // Close the ~/.obelisk watcher before the first await. close() flips its
+  // `closed` flag synchronously and every parcel event callback guards on it,
+  // so once this function yields, no teardown-time FSEvents delivery can
+  // enter user code — even when the bounded quit path (#187) cuts the
+  // remaining waits short. The service watcher's close() works the same way
+  // inside service.stop().
+  let watcherClosed: Promise<unknown> | null = null;
   if (obeliskWatcher) {
     const watcher = obeliskWatcher;
     obeliskWatcher = null;
     if (obeliskNotifyTimer) { clearTimeout(obeliskNotifyTimer); obeliskNotifyTimer = null; }
     pendingObeliskChanges.clear();
-    if (typeof watcher.close === 'function') await Promise.resolve(watcher.close());
+    if (typeof watcher.close === 'function') watcherClosed = Promise.resolve(watcher.close()).catch(() => {});
   }
+  await stopIndexerServiceAndWait();
+  if (stopWorker && indexerWorker) {
+    indexerWorker.stop();
+    indexerWorker = null;
+  }
+  if (watcherClosed) await watcherClosed;
   closeDb();
 }
 
@@ -492,9 +501,15 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => {
-  void stopBackgroundResources({ stopWorker: true });
-});
+// Quit must not tear the JS environment down while a watcher is still live: a
+// @parcel/watcher callback firing during CleanupHandles throws with no JS
+// frame to catch it, and napi_throw fatals the process (#187). The stop is
+// not cached: a macOS pause (window-all-closed) can be followed by activate →
+// restart, and a later quit must stop the restarted singletons.
+app.on('before-quit', createDeferredQuit({
+  quit: () => app.quit(),
+  stop: () => stopBackgroundResources({ stopWorker: true }),
+}));
 
 app.on('window-all-closed', () => {
   void stopBackgroundResources({ stopWorker: true });
