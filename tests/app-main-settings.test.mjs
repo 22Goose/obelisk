@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { acquireWriterLease } from '../packages/core/src/writer-lease.ts';
+import { defaultCopilotUserDataRoots } from '../packages/core/src/providers/copilot.ts';
 import { makeTempDir } from './temp-dirs.mjs';
 
 const require = createRequire(import.meta.url);
@@ -245,6 +246,8 @@ test('malformed settings keep the desktop recovery window available', async () =
 test('main process watches every root declared by the built-in provider registry', async () => {
   const originalHome = process.env.HOME;
   const originalProfile = process.env.USERPROFILE;
+  const originalAppData = process.env.APPDATA;
+  const originalXdgConfig = process.env.XDG_CONFIG_HOME;
   const home = makeTempDir(`obelisk-main-watch-dirs-${Date.now()}`);
   const claudeDir = join(home, '.claude');
   const codexDir = join(home, '.codex');
@@ -255,6 +258,9 @@ test('main process watches every root declared by the built-in provider registry
   writeFileSync(join(home, '.obelisk', 'obelisk.sqlite'), '');
   process.env.HOME = home;
   process.env.USERPROFILE = home; // os.homedir() reads USERPROFILE on Windows
+  process.env.APPDATA = join(home, 'AppData', 'Roaming');
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
+  const [stableCopilotRoot, insidersCopilotRoot] = defaultCopilotUserDataRoots();
 
   const serviceOptions = [];
   const workerCalls = [];
@@ -321,6 +327,12 @@ test('main process watches every root declared by the built-in provider registry
       { kind: 'tree', path: join(codexDir, 'sessions') },
       { kind: 'tree', path: join(codexDir, 'archived_sessions') },
       { kind: 'file', path: join(codexDir, 'session_index.jsonl') },
+      { kind: 'file', path: join(stableCopilotRoot, 'globalStorage', 'github.copilot-chat', 'session-store.db') },
+      { kind: 'file', path: join(stableCopilotRoot, 'globalStorage', 'github.copilot-chat', 'session-store.db-wal') },
+      { kind: 'tree', path: join(stableCopilotRoot, 'workspaceStorage') },
+      { kind: 'file', path: join(insidersCopilotRoot, 'globalStorage', 'github.copilot-chat', 'session-store.db') },
+      { kind: 'file', path: join(insidersCopilotRoot, 'globalStorage', 'github.copilot-chat', 'session-store.db-wal') },
+      { kind: 'tree', path: join(insidersCopilotRoot, 'workspaceStorage') },
       { kind: 'tree', path: join(home, '.dsh', 'sessions') },
       { kind: 'tree', path: join(home, '.kimi-code', 'sessions') },
       { kind: 'file', path: join(home, '.kimi-code', 'session_index.jsonl') },
@@ -334,6 +346,8 @@ test('main process watches every root declared by the built-in provider registry
     restore();
     restoreEnvVar('HOME', originalHome);
     restoreEnvVar('USERPROFILE', originalProfile);
+    restoreEnvVar('APPDATA', originalAppData);
+    restoreEnvVar('XDG_CONFIG_HOME', originalXdgConfig);
     rmSync(home, { recursive: true, force: true });
   }
 });

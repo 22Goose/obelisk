@@ -322,10 +322,16 @@ function buildIndex({
         codex: codexDir,
         ...providerRoots,
       };
+      const openCopilotChronicle = (sourcePath: string) => new (
+        DatabaseImpl as new (path: string, options?: { readonly?: boolean; fileMustExist?: boolean }) => any
+      )(sourcePath, { readonly: true, fileMustExist: true });
       const registry = providerRegistry
         ?? (providerSettings === undefined
-          ? createBuiltinProviderRegistry(roots)
-          : createConfiguredBuiltinProviderRuntime(providerSettings, { baseRoots: roots }).registry);
+          ? createBuiltinProviderRegistry(roots, { openCopilotChronicle })
+          : createConfiguredBuiltinProviderRuntime(providerSettings, {
+            baseRoots: roots,
+            openCopilotChronicle,
+          }).registry);
       const providerPlan = createProviderIndexPlan(db, registry, {
         force,
         changedPaths,

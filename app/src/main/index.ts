@@ -95,6 +95,10 @@ function getRuntimePaths(persisted = loadPersistedSettings()) {
       claude: DEFAULT_CLAUDE_DIR,
       codex: DEFAULT_CODEX_DIR,
     },
+    openCopilotChronicle: sourcePath => new Database(sourcePath, {
+      readonly: true,
+      fileMustExist: true,
+    }),
   });
   const providerRoots = runtime.roots;
   const providerRegistry = runtime.registry;
