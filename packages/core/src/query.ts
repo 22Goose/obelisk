@@ -67,8 +67,8 @@ function normalizeOpts(optsOrScalar: QueryOptions | string | number | null | und
   return optsOrScalar;
 }
 
-function assertNonNegativeLimit(limit: number, label = 'limit'): void {
-  if (limit < 0) throw new RangeError(`${label} must be non-negative`);
+function assertNonNegativeLimit(value: number, label: string): void {
+  if (value < 0) throw new RangeError(`${label} must be non-negative (got ${value})`);
 }
 
 function buildWhere(opts: QueryOptions, aliases: ColumnAliases) {
@@ -813,6 +813,7 @@ function createQueryApi(
   ) => {
     const { offset = 0, limit = 10000, includeInactive = false } = opts;
     assertNonNegativeLimit(limit, 'raw() limit');
+    assertNonNegativeLimit(offset, 'raw() offset');
     const message = db.prepare('SELECT * FROM messages WHERE uuid=?').get(messageUuid);
     if (!isQueryableMessage(message, includeInactive)) return null;
     const session = db.prepare('SELECT * FROM sessions WHERE id=?').get(message.session_id) ?? null;

@@ -87,7 +87,7 @@ test('--query rejects a negative helper limit instead of returning unbounded res
 
   assert.equal(result.status, 1);
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.error, 'sessions() limit must be non-negative');
+  assert.equal(payload.error, 'sessions() limit must be non-negative (got -1)');
   assert.equal(typeof payload.stack, 'string');
 });
 
