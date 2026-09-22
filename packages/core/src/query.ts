@@ -67,6 +67,10 @@ function normalizeOpts(optsOrScalar: QueryOptions | string | number | null | und
   return optsOrScalar;
 }
 
+function assertNonNegativeLimit(limit: number, label = 'limit'): void {
+  if (limit < 0) throw new RangeError(`${label} must be non-negative`);
+}
+
 function buildWhere(opts: QueryOptions, aliases: ColumnAliases) {
   const clauses: string[] = [];
   const params: any[] = [];
@@ -300,6 +304,7 @@ function createQueryApi(
       includeMeta = false,
       includeInactive = false,
     } = opts;
+    assertNonNegativeLimit(limit, 'search() limit');
     let where = 'WHERE mf.text MATCH ?';
     const filterParams: any[] = [];
     if (sessionId) { where += ' AND mf.session_id=?'; filterParams.push(sessionId); }
@@ -471,6 +476,7 @@ function createQueryApi(
   const subagents = (optsOrSid?: QueryOptions | string) => {
     const opts = normalizeOpts(optsOrSid);
     const { limit = 100 } = opts;
+    assertNonNegativeLimit(limit, 'subagents() limit');
     const needsJoin = opts.project || opts.branch || opts.source;
     // The subagents table has no timestamp column; scope time filters by the
     // subagent's activity interval instead of comparing session IDs. `after`
@@ -491,6 +497,7 @@ function createQueryApi(
   const workflows = (optsOrSid?: QueryOptions | string) => {
     const opts = normalizeOpts(optsOrSid);
     const { limit = 100 } = opts;
+    assertNonNegativeLimit(limit, 'workflows() limit');
     const needsJoin = opts.project || opts.branch || opts.source;
     const { where, params } = buildWhere(opts, { sessionId: 'w.session_id', project: 's.project', timestamp: 'w.timestamp', branch: 's.git_branch', source: 's.source' });
     params.push(limit);
@@ -512,6 +519,7 @@ function createQueryApi(
 
   const fileHistory = (fp: string, opts: QueryOptions = {}) => {
     const { limit = 200, after, before, source, includeInactive = false } = opts;
+    assertNonNegativeLimit(limit, 'fileHistory() limit');
     let where = `tc.file_path=? AND ${visibilitySql('m', includeInactive)}`;
     const params: any[] = [fp];
     if (after)  { where += ' AND m.timestamp > ?'; params.push(after); }
@@ -538,6 +546,7 @@ function createQueryApi(
   const failures = (optsOrSid?: QueryOptions | string) => {
     const opts = normalizeOpts(optsOrSid);
     const { limit = 50 } = opts;
+    assertNonNegativeLimit(limit, 'failures() limit');
     const includeInactive = opts.includeInactive === true;
     const needsJoin = opts.project || opts.branch || opts.source;
     const { where, params: filterParams } = buildWhere(opts, { sessionId: 'tr.session_id', project: 's.project', timestamp: 'rm.timestamp', branch: 's.git_branch', source: 's.source' });
@@ -590,6 +599,7 @@ function createQueryApi(
   const sessions = (optsOrN?: QueryOptions | number | string) => {
     const opts = normalizeOpts(optsOrN, 'sessionId');
     const { limit = 50 } = opts;
+    assertNonNegativeLimit(limit, 'sessions() limit');
     const { where, params } = buildWhere(opts, { sessionId: 's.id', project: 's.project', timestamp: 's.started_at', branch: 's.git_branch', source: 's.source' });
     params.push(limit);
     return db.prepare(`SELECT * FROM sessions s WHERE ${where} ORDER BY ended_at DESC LIMIT ?`).all(...params)
@@ -601,6 +611,7 @@ function createQueryApi(
   const summaries = (optsOrSid?: QueryOptions | string) => {
     const opts = normalizeOpts(optsOrSid);
     const { limit = 100 } = opts;
+    assertNonNegativeLimit(limit, 'summaries() limit');
     const includeInactive = opts.includeInactive === true;
     const { where, params } = buildWhere(opts, { sessionId: 'su.session_id', project: 's.project', timestamp: 'su.timestamp', branch: 's.git_branch', source: 's.source' });
     params.push(limit);
@@ -620,6 +631,9 @@ function createQueryApi(
     const sessionLimit = opts.limit ?? 8;
     const projectLimit = opts.projectLimit ?? 20;
     const memoryLimit = opts.memoryLimit ?? 100;
+    assertNonNegativeLimit(sessionLimit, 'overview() limit');
+    assertNonNegativeLimit(projectLimit, 'overview() projectLimit');
+    assertNonNegativeLimit(memoryLimit, 'overview() memoryLimit');
 
     const projectDescriptor = (row: DbRow | null, source: string, confidence: string) => row ? ({
       project: row.project,
@@ -798,6 +812,7 @@ function createQueryApi(
     opts: { offset?: number; limit?: number; includeInactive?: boolean } = {},
   ) => {
     const { offset = 0, limit = 10000, includeInactive = false } = opts;
+    assertNonNegativeLimit(limit, 'raw() limit');
     const message = db.prepare('SELECT * FROM messages WHERE uuid=?').get(messageUuid);
     if (!isQueryableMessage(message, includeInactive)) return null;
     const session = db.prepare('SELECT * FROM sessions WHERE id=?').get(message.session_id) ?? null;
@@ -832,6 +847,7 @@ function createQueryApi(
   const memories = (optsOrSid?: QueryOptions | string) => {
     const opts = normalizeOpts(optsOrSid);
     const { limit = 50, query } = opts;
+    assertNonNegativeLimit(limit, 'memories() limit');
     assertEnglishMemoryText(query, 'memories() query');
     const needsJoin = opts.branch || opts.source;
     const { where: baseWhere, params } = buildWhere(opts, {

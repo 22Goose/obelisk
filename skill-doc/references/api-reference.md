@@ -67,6 +67,7 @@ All list helpers accept bounded `limit` options. Many helpers also accept
 `project`, `sessionId`, `sessions`, `after`, `before`, `branch`, and `source`
 when the underlying table can express that scope. Passing a string to many list
 helpers is treated as `sessionId`; passing a number is treated as `limit`.
+Limits must be non-negative; passing a negative limit throws a `RangeError`.
 
 ### Mutation Helpers
 
