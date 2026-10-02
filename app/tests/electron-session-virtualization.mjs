@@ -741,14 +741,17 @@ async function run() {
     `document.querySelector('.flap-number')?.getAttribute('aria-label') === '${messageCount}'`,
     'the cold-start session snapshot',
   );
-  for (let attempt = 0; attempt < 100 && ipcReads.patches === 0; attempt++) {
-    await delay(10);
+  // The notification and patch cross IPC and the renderer's reload queue.
+  // Wait for that event with the same bounded deadline as the DOM probe.
+  const coldPatchDeadline = Date.now() + 8000;
+  while (ipcReads.patches === 0 && Date.now() < coldPatchDeadline) {
+    await delay(40);
   }
-  const coldOpenPatchReads = ipcReads.patches;
   await waitFor(win.webContents, `(() => {
     const timeline = document.querySelector('.virtual-timeline');
     return timeline && getComputedStyle(timeline).visibility === 'visible' && !document.querySelector('.first-open-loading');
   })()`, 'cold-open layout recovery');
+  const coldOpenPatchReads = ipcReads.patches;
   const coldOpenVisibility = await win.webContents.executeJavaScript(`(() => {
     const header = document.querySelector('.session-header');
     const timeline = document.querySelector('.virtual-timeline');
@@ -828,17 +831,26 @@ async function run() {
     };
     const unmounted = !document.querySelector('[data-view-key="tool:call-1"]');
     document.querySelector('button[title="First"]')?.click();
-    await new Promise(resolve => setTimeout(resolve, 350));
+    // A hidden Linux window can publish the jump before Vue remounts rows.
+    // Wait for remount, then assert the state separately so a closed row fails.
+    const remountDeadline = performance.now() + 8000;
+    while (!document.querySelector('[data-view-key="tool:call-1"]')) {
+      if (performance.now() > remountDeadline) throw new Error('First navigation did not remount the tool row');
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
     return {
       before,
       after,
       unmounted, unmountState,
       restored: Boolean(document.querySelector('[data-view-key="tool:call-1"].open')),
+      restoreState: { scrollTop: wrap.scrollTop, mounted: Boolean(document.querySelector('[data-view-key="tool:call-1"]')),
+        current: document.querySelector('.msg-nav-current')?.textContent,
+        translate: document.querySelector('.virtual-timeline')?.style.translate },
     };
   })()`, true);
   assert(disclosure.after > disclosure.before, `expanded tool row remeasures from ${disclosure.before}px to ${disclosure.after}px`);
   assert(disclosure.unmounted, `the expanded tool row unmounts outside overscan (${JSON.stringify(disclosure.unmountState)})`);
-  assert(disclosure.restored, 'disclosure state survives unmount and remount');
+  assert(disclosure.restored, `disclosure state survives unmount and remount (${JSON.stringify(disclosure.restoreState)})`);
 
   const passiveScrollSettlement = await win.webContents.executeJavaScript(`new Promise(resolve => {
     const wrap = document.querySelector('.detail-wrap');
@@ -1065,7 +1077,8 @@ async function run() {
     );
   }
   win.setContentSize(...originalContentSize);
-  await delay(250);
+  // This scenario starts after the preceding gesture and resize have settled.
+  await waitForStationaryLayout(win);
   await win.webContents.executeJavaScript(
     `window.location.hash = '#/sessions/${sessionId}?focus=${focusMessageUuid}'`,
     true,
@@ -1634,6 +1647,9 @@ async function run() {
     `(() => { const wrap = document.querySelector('.detail-wrap'); return wrap.scrollHeight - wrap.clientHeight - wrap.scrollTop < 2; })()`,
     'tail re-entry settlement',
   );
+  // Enter the idle tail-follow scenario after navigation measurements and the
+  // preceding gesture have settled, rather than racing their final commit.
+  await waitForStationaryLayout(win);
   appendMessage(win, tailAppendIndex);
   await waitFor(
     win.webContents,
