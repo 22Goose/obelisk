@@ -889,7 +889,8 @@ export function createCopilotProvider({
 
     if (inventoryComplete) {
       for (const session of indexed) {
-        if (liveSessionIds.has(session.sessionId)) continue;
+        if (liveSessionIds.has(session.sessionId)
+          || !sourceRoots.some((root) => pathInside(root, session.jsonlPath))) continue;
         units.push({
           key: `copilot-unit:${session.sessionId}`,
           sessionId: session.sessionId,

@@ -18,11 +18,13 @@ export function createBuiltinProviderRegistry(
   roots: BuiltinProviderRoots = {},
   {
     cwd,
+    copilotUserDataRoots,
     openCopilotChronicle,
     openHermesStore,
     openZcodeDatabase,
   }: {
     cwd?: string;
+    copilotUserDataRoots?: readonly string[];
     openCopilotChronicle?: CopilotChronicleOpener;
     openHermesStore?: HermesStoreOpener;
     openZcodeDatabase?: ZcodeDatabaseOpener;
@@ -31,7 +33,7 @@ export function createBuiltinProviderRegistry(
   return createProviderRegistry([
     createClaudeProvider({ rootDir: roots['claude'] }),
     createCodexProvider({ rootDir: roots['codex'] }),
-    createCopilotProvider({ rootDir: roots['copilot'], openChronicle: openCopilotChronicle }),
+    createCopilotProvider({ rootDir: roots['copilot'], userDataRoots: copilotUserDataRoots, openChronicle: openCopilotChronicle }),
     createDeepseekProvider({ rootDir: roots['deepseek'] }),
     createHermesProvider({ rootDir: roots['hermes'], openStore: openHermesStore }),
     createKimiProvider({ rootDir: roots['kimi'] }),

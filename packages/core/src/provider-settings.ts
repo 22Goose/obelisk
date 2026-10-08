@@ -14,12 +14,23 @@ import {
   type ProviderRegistry,
 } from './providers/registry.ts';
 import type { CopilotChronicleOpener } from './providers/copilot.ts';
+import { defaultCopilotUserDataRoots } from './providers/copilot.ts';
 import type { HermesStoreOpener } from './providers/hermes.ts';
 import type { ZcodeDatabaseOpener } from './providers/zcode.ts';
 
 export type PersistedProviderSettings = Record<string, unknown> & {
   providerRoots?: Record<string, unknown>;
+  copilotEditions?: Record<string, unknown>;
 };
+
+export function getCopilotEditions(persisted: PersistedProviderSettings) {
+  const [stable, insiders] = defaultCopilotUserDataRoots();
+  const settings = persisted.copilotEditions;
+  return [
+    { id: 'stable', name: 'VS Code', path: stable!, enabled: settings?.stable !== false },
+    { id: 'insiders', name: 'VS Code Insiders', path: insiders!, enabled: settings?.insiders !== false },
+  ];
+}
 
 export interface ProviderSettingsReadResult {
   readonly ok: boolean;
@@ -27,7 +38,7 @@ export interface ProviderSettingsReadResult {
   readonly error?: string;
 }
 
-function hasExplicitProviderRoot(
+export function hasExplicitProviderRoot(
   persisted: PersistedProviderSettings,
   providerId: string,
 ): boolean {
@@ -138,13 +149,20 @@ export function createConfiguredBuiltinProviderRuntime(
   const roots = resolveProviderRoots(defaults, persisted, { homeDir });
   const copilotUsesAutomaticRoots = baseRoots.copilot === undefined
     && !hasExplicitProviderRoot(persisted, 'copilot');
+  const copilotUserDataRoots = copilotUsesAutomaticRoots
+    ? getCopilotEditions(persisted).filter((edition) => edition.enabled).map((edition) => edition.path)
+    : undefined;
+  if (copilotUserDataRoots?.[0]) roots.copilot = copilotUserDataRoots[0];
   const configured = createBuiltinProviderRegistry(
     {
       ...baseRoots,
       ...roots,
       ...(copilotUsesAutomaticRoots ? { copilot: undefined } : {}),
     },
-    { cwd, openCopilotChronicle, openHermesStore, openZcodeDatabase },
+    {
+      cwd, openCopilotChronicle, openHermesStore, openZcodeDatabase,
+      copilotUserDataRoots,
+    },
   );
   return {
     roots,

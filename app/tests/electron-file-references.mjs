@@ -32,6 +32,7 @@ const channels = [
 let failures = 0;
 const openCalls = [];
 const settingCalls = [];
+let stableEnabled = true;
 
 const messageText = [
   'Absolute link: [roadmap.md](/tmp/obelisk-file-ref-fixture/docs/roadmap.md:162)',
@@ -114,9 +115,20 @@ function registerHandlers() {
   ipcMain.handle('settings:get', () => ({
     editorScheme: 'vscode',
     version: '9.8.7-test',
+    sources: [{
+      id: 'copilot', name: 'GitHub Copilot', vendor: 'GitHub', color: '#8957e5',
+      path: '/fixture/Code/User', settingKey: 'providerRoots.copilot',
+      status: 'warn', statusText: 'No sessions found', sessionCount: 0, lastIndexed: '',
+    }],
+    copilotEditions: [
+      { id: 'stable', name: 'VS Code', path: '/fixture/Code/User', enabled: stableEnabled },
+      { id: 'insiders', name: 'VS Code Insiders', path: '/fixture/Code - Insiders/User', enabled: true },
+    ],
+    copilotCustomRoot: false,
   }));
   ipcMain.handle('settings:set', (_event, key, value) => {
     settingCalls.push({ key, value });
+    if (key === 'copilotEditions.stable') stableEnabled = value;
     return true;
   });
   ipcMain.handle('file-ref:open', (_event, ref) => {
@@ -230,6 +242,14 @@ async function run() {
   assert(settingsState.label.includes('VS Code'), `editor picker uses a readable label (${settingsState.label})`);
   assert(settingsState.nativeSelects === 0, 'Settings does not fall back to a native select');
   assert(settingsState.version === 'Obelisk 9.8.7-test', `Settings renders the IPC app version (${settingsState.version})`);
+
+  const copilotCheckboxes = await win.webContents.executeJavaScript(`(() =>
+    [...document.querySelectorAll('.copilot-edition input[type="checkbox"]')].map(input => input.checked)
+  )()`, true);
+  assert(JSON.stringify(copilotCheckboxes) === '[true,true]', 'Copilot settings default to both folders enabled');
+  await win.webContents.executeJavaScript(`document.querySelector('.copilot-edition input').click()`, true);
+  await waitFor(win.webContents, `document.querySelector('.copilot-edition input')?.checked === false`, 'Copilot Stable toggle');
+  assert(settingCalls.some(call => call.key === 'copilotEditions.stable' && call.value === false), 'Copilot folder toggle persists through settings IPC');
 
   await win.webContents.executeJavaScript(
     `document.querySelector('.editor-picker-trigger').click()`, true,

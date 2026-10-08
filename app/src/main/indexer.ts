@@ -17,6 +17,7 @@ import { healWorkflowParentLinks } from '../../../packages/core/src/indexer.ts';
 import type { ProviderRegistry } from '../../../packages/core/src/providers/registry.ts';
 import {
   createConfiguredBuiltinProviderRuntime,
+  hasExplicitProviderRoot,
   type PersistedProviderSettings,
 } from '../../../packages/core/src/provider-settings.ts';
 import {
@@ -335,7 +336,10 @@ function buildIndex({
         ?? (providerSettings === undefined
           ? createBuiltinProviderRegistry(roots, { openCopilotChronicle, openHermesStore, openZcodeDatabase })
           : createConfiguredBuiltinProviderRuntime(providerSettings, {
-            baseRoots: roots,
+            baseRoots: {
+              ...roots,
+              ...(!hasExplicitProviderRoot(providerSettings, 'copilot') ? { copilot: undefined } : {}),
+            },
             openCopilotChronicle,
             openHermesStore,
             openZcodeDatabase,

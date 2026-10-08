@@ -22,6 +22,8 @@ import { storedSessionCursor } from '../../../packages/core/src/provider-indexin
 import { createBuiltinProviderRegistry } from '../../../packages/core/src/providers/builtins.ts';
 import {
   createConfiguredBuiltinProviderRuntime,
+  getCopilotEditions,
+  hasExplicitProviderRoot,
   readPersistedProviderSettings,
 } from '../../../packages/core/src/provider-settings.ts';
 import {
@@ -1082,6 +1084,8 @@ function savePersistedSettings(settings) {
 ipcMain.handle('settings:get', () => {
   const persisted = loadPersistedSettings();
   const paths = getRuntimePaths(persisted);
+  const copilotEditions = getCopilotEditions(persisted);
+  const copilotCustomRoot = hasExplicitProviderRoot(persisted, 'copilot');
   const { providerRoots, providerRegistry, claudeDir, codexDir, dbPath: dbFile } = paths;
   const recapDir = persisted.recapDir || RECAP_DIR;
   let memoryCount = 0;
@@ -1105,12 +1109,31 @@ ipcMain.handle('settings:get', () => {
       memoryCount = db.prepare('SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL').get()?.c || 0;
     } catch {}
   }
+  const selectedCopilotEditions = copilotEditions.filter((edition) => edition.enabled);
   const sources = buildSourceCatalog({
     registry: providerRegistry,
-    roots: providerRoots,
+    roots: copilotCustomRoot ? providerRoots : {
+      ...providerRoots,
+      copilot: selectedCopilotEditions[0]?.path ?? '',
+    },
     stats: sourceStats,
     sourceIssues: latestSourceIssues,
     pathExists: fs.existsSync,
+  }).map((source) => {
+    if (source.id !== 'copilot' || copilotCustomRoot) return source;
+    if (selectedCopilotEditions.length === 0) {
+      return { ...source, exists: false, status: 'warn', statusText: 'No folders selected' };
+    }
+    if (source.exists || !selectedCopilotEditions.some((edition) => fs.existsSync(edition.path))) return source;
+    const issue = latestSourceIssues.find((candidate) => candidate.provider === 'copilot');
+    return {
+      ...source,
+      exists: true,
+      status: 'warn',
+      statusText: issue === undefined
+        ? source.sessionCount > 0 ? 'Connected' : 'No sessions found'
+        : `Index issue: ${issue.path} — ${issue.error}`,
+    };
   });
   const sessionCount = sources.reduce((sum, source) => sum + source.sessionCount, 0);
   const lastIndexed = sources.map((source) => source.lastIndexed).filter(Boolean).sort().at(-1) || '';
@@ -1120,6 +1143,8 @@ ipcMain.handle('settings:get', () => {
   return {
     version: app.getVersion(),
     providerRoots,
+    copilotEditions,
+    copilotCustomRoot,
     claudeDir,
     codexDir,
     dbPath: dbFile,

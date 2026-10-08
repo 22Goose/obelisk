@@ -267,6 +267,7 @@ test('main process watches every root declared by the built-in provider registry
 
   const serviceOptions = [];
   const workerCalls = [];
+  const ipcHandlers = new Map();
 
   class FakeDatabase {
     pragma() {}
@@ -290,7 +291,10 @@ test('main process watches every root declared by the built-in provider registry
   }
 
   const restore = registerMocks([
-    [ELECTRON_URL, { namedExports: electronNamespace({ BrowserWindow: FakeBrowserWindow }) }],
+    [ELECTRON_URL, { namedExports: electronNamespace({
+      BrowserWindow: FakeBrowserWindow,
+      ipcMain: { handle(channel, handler) { ipcHandlers.set(channel, handler); } },
+    }) }],
     [DATABASE_URL, { defaultExport: FakeDatabase }],
     [WATCHER_URL, { namedExports: noopWatcher() }],
     [INDEXER_URL, { namedExports: { writeHeartbeat() {} } }],
@@ -350,6 +354,14 @@ test('main process watches every root declared by the built-in provider registry
     assert.equal(serviceOptions[0].watchTargets.some((t) => t.path === codexDir), false);
     await serviceOptions[0].buildIndex({ reason: 'settings-transfer' });
     assert.deepEqual(workerCalls[0].providerSettings, {});
+    assert.deepEqual(ipcHandlers.get('settings:get')().copilotEditions.map((edition) => edition.enabled), [true, true]);
+    await ipcHandlers.get('settings:set')(null, 'copilotEditions.stable', false);
+    assert.deepEqual(ipcHandlers.get('settings:get')().copilotEditions.map((edition) => edition.enabled), [false, true]);
+    assert.equal(serviceOptions.length, 2);
+    assert.equal(serviceOptions[1].watchTargets.some((target) => target.path.startsWith(stableCopilotRoot)), false);
+    assert.equal(serviceOptions[1].watchTargets.some((target) => target.path.startsWith(insidersCopilotRoot)), true);
+    await serviceOptions[1].buildIndex({ reason: 'settings-transfer' });
+    assert.deepEqual(workerCalls[1].providerSettings.copilotEditions, { stable: false });
   } finally {
     restore();
     restoreEnvVar('HOME', originalHome);
