@@ -9,7 +9,7 @@
 [![version](https://img.shields.io/github/v/tag/tommy0103/obelisk?label=version&style=flat-square)](https://github.com/tommy0103/obelisk/releases)
 [![license](https://img.shields.io/badge/license-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
 
-Past Claude Code, Codex, GitHub Copilot, DeepSeek Harness, Hermes Agent, Kimi Code, OMP, Pi, and ZCode sessions -- queryable by your agent, browsable by you.
+Past Claude Code, Codex, GitHub Copilot, DeepSeek Harness, Hermes Agent, Kiro, Kimi Code, OMP, Pi, and ZCode sessions -- queryable by your agent, browsable by you.
 
 **English** · [中文](README.zh-CN.md)
 
@@ -164,8 +164,8 @@ where the source tool has the concept:
 | **Sessions** | Title, project, timestamps, git branch, source | all providers |
 | **Messages** | Full text, model, token usage, parent chain | all providers |
 | **Tool calls** | Tool name, input, file paths | all providers |
-| **Subagents** | Agent type, description, full conversation | Claude Code, Codex, DeepSeek Harness, Hermes Agent, Kimi Code, ZCode |
-| **Summaries** | Session summaries emitted by the provider | Kimi Code |
+| **Subagents** | Agent type, description, full conversation | Claude Code, Codex, DeepSeek Harness, Hermes Agent, Kiro V3, Kimi Code, ZCode |
+| **Summaries** | Session summaries emitted by the provider | Kiro V3, Kimi Code |
 | **Workflows** | Workflow script, result, and per-agent transcripts | Claude Code |
 | **Memories** | Conclusions linked to source sessions | registered markdown files |
 
@@ -184,6 +184,7 @@ non-Claude IDs are provider-prefixed so they cannot collide.
 | GitHub Copilot | VS Code `User` data roots (Chronicle store + workspace transcripts) |
 | DeepSeek Harness | `~/.dsh/sessions` (or `$DSH_HOME/sessions`) |
 | Hermes Agent | `~/.hermes/state.db` (or `$HERMES_HOME/state.db`) |
+| Kiro | `~/.kiro/sessions` and the platform `kiro-cli/data.sqlite3` store |
 | Kimi Code | `~/.kimi-code/sessions` (or `$KIMI_CODE_HOME/sessions`) |
 | OMP | `~/.omp/agent/sessions` |
 | Pi | `~/.pi/agent/sessions` |
