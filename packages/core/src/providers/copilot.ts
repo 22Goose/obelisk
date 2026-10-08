@@ -123,7 +123,9 @@ function samePath(left: string, right: string): boolean {
 }
 
 function pathInside(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate.split('#', 1)[0]!);
+  // Chronicle's #session suffix stays in the final path component; it does not
+  // change containment. A # elsewhere may be part of a real directory name.
+  const rel = relative(root, candidate);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 

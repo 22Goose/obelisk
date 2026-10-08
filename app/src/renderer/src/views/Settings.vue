@@ -28,6 +28,8 @@ const rebuilding = ref(false);
 const rebuildError = ref('');
 const version = ref('');
 let stopIndexUpdates = null;
+let settingsRequestVersion = 0;
+let settingsLoaded = false;
 
 onMounted(async () => {
   stopIndexUpdates = window.obelisk?.onIndexUpdated?.(() => {
@@ -47,16 +49,21 @@ onBeforeUnmount(() => {
 
 async function loadSettings({ preserveRecapPath = false } = {}) {
   if (!window.obelisk?.getSettings) return;
+  const requestVersion = ++settingsRequestVersion;
   const s = await window.obelisk.getSettings();
+  if (requestVersion !== settingsRequestVersion) return;
   sources.value = s.sources || [];
   copilotEditions.value = s.copilotEditions || [];
   copilotCustomRoot.value = s.copilotCustomRoot === true;
   dbPath.value = s.dbPath || '';
+  // The first accepted snapshot initializes the form even during a refresh.
+  preserveRecapPath = preserveRecapPath && settingsLoaded;
   if (!preserveRecapPath) recapPath.value = s.recapDir || '~/.obelisk/recap';
   autoRefresh.value = s.autoRefresh !== false;
   editorScheme.value = s.editorScheme || 'vscode';
   memoryCount.value = s.memoryCount || 0;
   version.value = s.version || '';
+  settingsLoaded = true;
 }
 
 async function saveEditorScheme(value) {
@@ -90,8 +97,9 @@ async function browseSourcePath(source) {
   }
 }
 
-async function toggleCopilotEdition(edition) {
-  await saveSetting(`copilotEditions.${edition.id}`, !edition.enabled);
+async function toggleCopilotEdition(edition, enabled) {
+  edition.enabled = enabled;
+  await saveSetting(`copilotEditions.${edition.id}`, enabled);
   await loadSettings();
 }
 
@@ -200,7 +208,7 @@ function fmtRelative(iso) {
           <div class="source-card-body">
             <div v-if="src.id === 'copilot' && !copilotCustomRoot" class="copilot-editions">
               <label v-for="edition in copilotEditions" :key="edition.id" class="copilot-edition">
-                <input type="checkbox" :checked="edition.enabled" @change="toggleCopilotEdition(edition)" />
+                <input type="checkbox" :checked="edition.enabled" @change="toggleCopilotEdition(edition, $event.target.checked)" />
                 <span class="copilot-edition-details">
                   <span>{{ edition.name }}</span>
                   <span class="copilot-edition-path">{{ edition.path }}</span>

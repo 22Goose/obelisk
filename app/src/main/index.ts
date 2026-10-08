@@ -1081,7 +1081,7 @@ function savePersistedSettings(settings) {
   }
 }
 
-ipcMain.handle('settings:get', () => {
+ipcMain.handle('settings:get', async () => {
   const persisted = loadPersistedSettings();
   const paths = getRuntimePaths(persisted);
   const copilotEditions = getCopilotEditions(persisted);
@@ -1110,30 +1110,35 @@ ipcMain.handle('settings:get', () => {
     } catch {}
   }
   const selectedCopilotEditions = copilotEditions.filter((edition) => edition.enabled);
+  const sourcePaths = new Set([
+    ...providerRegistry.catalog().map((provider) => providerRoots[provider.id] ?? provider.defaultRoot),
+    ...(!copilotCustomRoot ? selectedCopilotEditions.map((edition) => edition.path) : []),
+  ]);
+  const existingPaths = new Set((await Promise.all([...sourcePaths].map(async (sourcePath) => {
+    try {
+      await fs.promises.access(sourcePath);
+      return sourcePath;
+    } catch {
+      return null;
+    }
+  }))).filter((sourcePath): sourcePath is string => sourcePath !== null));
+  const copilotCatalogRoot = selectedCopilotEditions.find((edition) => existingPaths.has(edition.path))
+    ?? selectedCopilotEditions[0];
   const sources = buildSourceCatalog({
     registry: providerRegistry,
     roots: copilotCustomRoot ? providerRoots : {
       ...providerRoots,
-      copilot: selectedCopilotEditions[0]?.path ?? '',
+      copilot: copilotCatalogRoot?.path ?? '',
     },
     stats: sourceStats,
     sourceIssues: latestSourceIssues,
-    pathExists: fs.existsSync,
+    pathExists: (sourcePath) => existingPaths.has(sourcePath),
   }).map((source) => {
     if (source.id !== 'copilot' || copilotCustomRoot) return source;
     if (selectedCopilotEditions.length === 0) {
       return { ...source, exists: false, status: 'warn', statusText: 'No folders selected' };
     }
-    if (source.exists || !selectedCopilotEditions.some((edition) => fs.existsSync(edition.path))) return source;
-    const issue = latestSourceIssues.find((candidate) => candidate.provider === 'copilot');
-    return {
-      ...source,
-      exists: true,
-      status: 'warn',
-      statusText: issue === undefined
-        ? source.sessionCount > 0 ? 'Connected' : 'No sessions found'
-        : `Index issue: ${issue.path} — ${issue.error}`,
-    };
+    return source;
   });
   const sessionCount = sources.reduce((sum, source) => sum + source.sessionCount, 0);
   const lastIndexed = sources.map((source) => source.lastIndexed).filter(Boolean).sort().at(-1) || '';

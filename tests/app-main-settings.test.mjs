@@ -273,8 +273,14 @@ test('main process watches every root declared by the built-in provider registry
     pragma() {}
     exec() {}
     close() {}
-    prepare() {
-      return { get: () => null, all: () => [], run: () => ({}) };
+    prepare(sql) {
+      return {
+        get: () => null,
+        all: () => sql.includes("GROUP BY COALESCE(source")
+          ? [{ source: 'copilot', session_count: 2, last_indexed: '2026-10-08' }]
+          : [],
+        run: () => ({}),
+      };
     }
   }
 
@@ -354,9 +360,16 @@ test('main process watches every root declared by the built-in provider registry
     assert.equal(serviceOptions[0].watchTargets.some((t) => t.path === codexDir), false);
     await serviceOptions[0].buildIndex({ reason: 'settings-transfer' });
     assert.deepEqual(workerCalls[0].providerSettings, {});
-    assert.deepEqual(ipcHandlers.get('settings:get')().copilotEditions.map((edition) => edition.enabled), [true, true]);
+    mkdirSync(insidersCopilotRoot, { recursive: true });
+    const defaultSettings = await ipcHandlers.get('settings:get')();
+    assert.deepEqual(defaultSettings.copilotEditions.map((edition) => edition.enabled), [true, true]);
+    const copilotSource = defaultSettings.sources.find((source) => source.id === 'copilot');
+    assert.equal(copilotSource.exists, true);
+    assert.equal(copilotSource.sessionCount, 2);
+    assert.equal(copilotSource.status, 'ok', 'Insiders-only indexed history is connected without a warning');
+    assert.equal(copilotSource.statusText, 'Connected');
     await ipcHandlers.get('settings:set')(null, 'copilotEditions.stable', false);
-    assert.deepEqual(ipcHandlers.get('settings:get')().copilotEditions.map((edition) => edition.enabled), [false, true]);
+    assert.deepEqual((await ipcHandlers.get('settings:get')()).copilotEditions.map((edition) => edition.enabled), [false, true]);
     assert.equal(serviceOptions.length, 2);
     assert.equal(serviceOptions[1].watchTargets.some((target) => target.path.startsWith(stableCopilotRoot)), false);
     assert.equal(serviceOptions[1].watchTargets.some((target) => target.path.startsWith(insidersCopilotRoot)), true);
