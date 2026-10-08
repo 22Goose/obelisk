@@ -22,6 +22,8 @@ import { storedSessionCursor } from '../../../packages/core/src/provider-indexin
 import { createBuiltinProviderRegistry } from '../../../packages/core/src/providers/builtins.ts';
 import {
   createConfiguredBuiltinProviderRuntime,
+  getCopilotEditions,
+  hasExplicitProviderRoot,
   readPersistedProviderSettings,
 } from '../../../packages/core/src/provider-settings.ts';
 import {
@@ -1086,9 +1088,11 @@ function savePersistedSettings(settings) {
   }
 }
 
-ipcMain.handle('settings:get', () => {
+ipcMain.handle('settings:get', async () => {
   const persisted = loadPersistedSettings();
   const paths = getRuntimePaths(persisted);
+  const copilotEditions = getCopilotEditions(persisted);
+  const copilotCustomRoot = hasExplicitProviderRoot(persisted, 'copilot');
   const { providerRoots, providerRegistry, claudeDir, codexDir, dbPath: dbFile } = paths;
   const recapDir = persisted.recapDir || RECAP_DIR;
   let memoryCount = 0;
@@ -1112,12 +1116,36 @@ ipcMain.handle('settings:get', () => {
       memoryCount = db.prepare('SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL').get()?.c || 0;
     } catch {}
   }
+  const selectedCopilotEditions = copilotEditions.filter((edition) => edition.enabled);
+  const sourcePaths = new Set([
+    ...providerRegistry.catalog().map((provider) => providerRoots[provider.id] ?? provider.defaultRoot),
+    ...(!copilotCustomRoot ? selectedCopilotEditions.map((edition) => edition.path) : []),
+  ]);
+  const existingPaths = new Set((await Promise.all([...sourcePaths].map(async (sourcePath) => {
+    try {
+      await fs.promises.access(sourcePath);
+      return sourcePath;
+    } catch {
+      return null;
+    }
+  }))).filter((sourcePath): sourcePath is string => sourcePath !== null));
+  const copilotCatalogRoot = selectedCopilotEditions.find((edition) => existingPaths.has(edition.path))
+    ?? selectedCopilotEditions[0];
   const sources = buildSourceCatalog({
     registry: providerRegistry,
-    roots: providerRoots,
+    roots: copilotCustomRoot ? providerRoots : {
+      ...providerRoots,
+      copilot: copilotCatalogRoot?.path ?? '',
+    },
     stats: sourceStats,
     sourceIssues: latestSourceIssues,
-    pathExists: fs.existsSync,
+    pathExists: (sourcePath) => existingPaths.has(sourcePath),
+  }).map((source) => {
+    if (source.id !== 'copilot' || copilotCustomRoot) return source;
+    if (selectedCopilotEditions.length === 0) {
+      return { ...source, exists: false, status: 'warn', statusText: 'No folders selected' };
+    }
+    return source;
   });
   const sessionCount = sources.reduce((sum, source) => sum + source.sessionCount, 0);
   const lastIndexed = sources.map((source) => source.lastIndexed).filter(Boolean).sort().at(-1) || '';
@@ -1127,6 +1155,8 @@ ipcMain.handle('settings:get', () => {
   return {
     version: app.getVersion(),
     providerRoots,
+    copilotEditions,
+    copilotCustomRoot,
     claudeDir,
     codexDir,
     dbPath: dbFile,
