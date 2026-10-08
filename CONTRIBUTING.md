@@ -160,6 +160,14 @@ interactions, or the full Electron suites.
   overwrite the first.
 - **A test must actually call `discover()`.** Asserting the resolved root string
   passes even when the directory-layout assumption is wrong.
+- **Trace source-root selection through every runtime.** For defaults, explicit
+  overrides, and per-root switches, verify that settings, watch targets, worker
+  and CLI discovery agree. Cover restart and the empty selection, not just the
+  path displayed in Settings.
+- **Excluding a root is not evidence that its sessions were deleted.** Limit
+  inventory-based tombstones to roots actually scanned with a complete census.
+  Decide and test what happens to previously indexed sessions on both ordinary
+  refresh and deliberate full rebuild.
 - **Verify directory layout against the upstream source or format docs**, not
   against what your own machine happens to look like. A tool's default root and
   its custom root often have different nesting.
