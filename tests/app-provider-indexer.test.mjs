@@ -89,6 +89,8 @@ test('desktop worker indexes Insiders-only Copilot history by default and respec
     assert.equal(disabledRuntime.registry.watchTargets(disabledRuntime.roots).some((target) => target.path.includes('copilot-chat')), false);
     buildIndex({ ...options, providerSettings: disabledSettings, providerRoots: disabledRuntime.roots, dbPath: selectedDbPath });
     assert.equal(countSessions(selectedDbPath), 1, 'disabling both directories retains indexed history');
+    buildIndex({ ...options, providerSettings: disabledSettings, providerRoots: disabledRuntime.roots, dbPath: selectedDbPath, force: true });
+    assert.equal(countSessions(selectedDbPath), 0, 'full rebuild only includes enabled Copilot directories');
     const explicitDbPath = join(base, 'explicit', 'obelisk.sqlite');
     buildIndex({ ...options, providerSettings: explicitSettings, providerRoots: explicitRuntime.roots, dbPath: explicitDbPath });
     assert.equal(countSessions(explicitDbPath), 1, 'explicit root indexes only the selected edition');
