@@ -178,8 +178,12 @@ async function run() {
   await check(win, `${rows}.length > 0 && ${rows}.length < 80 && document.querySelector('.srow.noise')`,
     'expanded quiet sessions are virtualized and reachable');
   const quietRows = await win.webContents.executeJavaScript(`${rows}.length`);
-  const quietId = await win.webContents.executeJavaScript("document.querySelector('.srow.noise').dataset.sessionId");
-  await win.webContents.executeJavaScript("document.querySelector('.srow.noise').click()");
+  const quietId = await win.webContents.executeJavaScript(`(() => {
+    const row = document.querySelector('.srow.noise');
+    const id = row.dataset.sessionId;
+    row.click();
+    return id;
+  })()`);
   await check(win, `document.querySelector('[data-uuid="${quietId}-message"]')`, 'expanded quiet session opens its detail');
   assert.ok(calls.filter(([kind]) => kind === 'catalogue').every(([, opts]) => opts.limit <= 100), 'catalogue IPC stays bounded');
   assert.ok(Math.max(...pageBytes) < 100_000, 'no catalogue response transfers an unbounded IPC payload');
