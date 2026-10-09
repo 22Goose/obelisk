@@ -24,6 +24,8 @@ const channels = [];
 const calls = [];
 const pageBytes = [];
 let releaseCatalogue;
+let pageGate = Promise.resolve();
+let releasePageGate;
 const catalogueReady = new Promise(resolve => { releaseCatalogue = resolve; });
 let catalogueReleased = false;
 const errors = [];
@@ -71,6 +73,7 @@ async function run() {
   handle('db:getSessionCatalogue', async (_event, opts = {}) => {
     calls.push(['catalogue', opts]);
     await catalogueReady;
+    await pageGate;
     assert.ok(opts.limit > 0 && opts.limit <= 100 && opts.offset >= 0);
     const q = (opts.query || '').trim().toLowerCase();
     const matches = sessions.filter(s => (opts.source === 'all' || (s.source || 'claude') === (opts.source || 'claude'))
@@ -138,6 +141,35 @@ async function run() {
     'scrolling reaches sessions beyond the first 1000');
   const browseRows = await win.webContents.executeJavaScript(`${rows}.length`);
   assert.ok(browseRows < 80, 'DOM row count remains bounded while browsing');
+  const anchor = await win.webContents.executeJavaScript(`(() => {
+    const scroll = document.querySelector('.session-scroll');
+    const top = scroll.getBoundingClientRect().top;
+    const row = [...document.querySelectorAll('.srow[data-session-id]')].find(el => el.getBoundingClientRect().bottom > top);
+    return { id: row.dataset.sessionId, offset: row.getBoundingClientRect().top - top, scrollTop: scroll.scrollTop };
+  })()`);
+  const catalogueReadsBeforeRefresh = calls.filter(([kind]) => kind === 'catalogue').length;
+  pageGate = new Promise(resolve => { releasePageGate = resolve; });
+  win.webContents.send('obelisk:index-updated', {});
+  await waitFor(win, 'true', 'renderer remains responsive during refresh');
+  const refreshDeadline = Date.now() + 10_000;
+  while (calls.filter(([kind]) => kind === 'catalogue').length === catalogueReadsBeforeRefresh && Date.now() < refreshDeadline) await delay(10);
+  assert.ok(calls.filter(([kind]) => kind === 'catalogue').length > catalogueReadsBeforeRefresh, 'background refresh requests new pages');
+  const anchorPosition = `(() => {
+    const scroll = document.querySelector('.session-scroll');
+    const row = document.querySelector('[data-session-id="${anchor.id}"]');
+    return row ? { offset: row.getBoundingClientRect().top - scroll.getBoundingClientRect().top, scrollTop: scroll.scrollTop } : null;
+  })()`;
+  const duringRefresh = await win.webContents.executeJavaScript(anchorPosition);
+  assert.ok(duringRefresh && Math.abs(duringRefresh.offset - anchor.offset) <= 2,
+    'background catalogue refresh keeps the visible reader anchor while IPC is pending');
+  releasePageGate();
+  pageGate = Promise.resolve();
+  await delay(100);
+  const afterRefresh = await win.webContents.executeJavaScript(anchorPosition);
+  assert.ok(afterRefresh && Math.abs(afterRefresh.offset - anchor.offset) <= 2
+    && Math.abs(afterRefresh.scrollTop - anchor.scrollTop) <= 2,
+    'background catalogue refresh does not move the reader after pages settle');
+  console.log('PASS: background catalogue refresh preserves the visible reader anchor');
   await win.webContents.executeJavaScript("document.querySelector('#sort-toggle').click()");
   await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-0'`,
     'oldest-first sorting reaches the actual oldest session');
@@ -166,6 +198,19 @@ async function run() {
     'an older result opens its real session detail');
   await win.webContents.executeJavaScript("window.location.hash = '#/sessions'");
   await check(win, `document.querySelector('.project-crumb')`, 'returning from detail retains the project filter');
+  const updated = sessions.find(session => session.id === 'catalogue-1');
+  updated.title = 'Updated inactive session title';
+  updated.git_branch = 'updated-branch';
+  win.webContents.send('obelisk:session-updated', { sessionId: updated.id });
+  win.webContents.send('obelisk:index-updated', {});
+  await check(win, `document.querySelector('[data-session-id="catalogue-1"]')?.textContent.includes('Updated inactive session title')`,
+    'an inactive session update refreshes its catalogue row');
+  await win.webContents.executeJavaScript(`document.querySelector('[data-session-id="catalogue-1"]').click()`);
+  await check(win, `document.querySelector('.session-header')?.textContent.includes('Updated inactive session title')`,
+    'reopening an updated session refreshes the detail metadata');
+  await win.webContents.executeJavaScript("window.location.hash = '#/sessions'");
+  await check(win, `document.querySelector('.project-crumb')`, 'return from refreshed detail');
+
   await win.webContents.executeJavaScript("document.querySelector('.breadcrumb .crumb').click()");
   await win.webContents.executeJavaScript("document.querySelector('.source-filter-wrap .filter-btn').click()");
   await win.webContents.executeJavaScript(`[...document.querySelectorAll('.fd-row')].find(el => el.textContent.includes('Claude')).click()`);
@@ -222,6 +267,7 @@ app.whenReady().then(run).catch(error => {
   console.error(error.stack || error);
 }).finally(() => {
   releaseCatalogue();
+  releasePageGate?.();
   for (const channel of channels) ipcMain.removeHandler(channel);
   app.exit(failed ? 1 : 0);
 });

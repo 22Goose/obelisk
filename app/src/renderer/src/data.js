@@ -81,8 +81,7 @@ export function commitInitialData({ rawMemories, stats, projects }) {
 export async function loadSessionDetail(sessionId) {
   // A direct route can open before the catalogue loads or while its refresh is
   // deferred. Resolve metadata by exact ID instead of requiring list membership.
-  const metadata = sessionMetadata(state.sessions.find(candidate => candidate.id === sessionId)
-    ?? (await window.obelisk.getSessions({ source: 'all', sessionId, limit: 1 }))[0]);
+  const metadata = sessionMetadata((await window.obelisk.getSessions({ source: 'all', sessionId, limit: 1 }))[0]);
   if (!metadata) return null;
   const [messages, toolCalls, toolResults, subagents, workflows, summaries] = await Promise.all([
     window.obelisk.getSessionMessages(sessionId),
@@ -166,6 +165,7 @@ function commitSessionDetail(sessionId, { messages, workflows = [], summaries = 
   if (workflows.length > 0) assembled.workflow = workflows[0];
 
   if (updateStore) {
+    state.sessionTitleOverrides.delete(sessionId);
     const index = state.sessions.findIndex(candidate => candidate.id === sessionId);
     if (index !== -1) state.sessions[index] = assembled;
     else state.sessions = [assembled];

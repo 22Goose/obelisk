@@ -39,9 +39,9 @@ const options = () => ({
   descending: state.sortDesc,
 });
 
-async function fetchPage(quiet, page, version) {
+async function fetchPage(quiet, page, version, refresh = false) {
   const key = `${quiet}:${page}`;
-  if (pages.value.has(key) || pending.has(key)) return;
+  if ((!refresh && pages.value.has(key)) || pending.has(key)) return;
   pending.add(key);
   try {
     const result = await window.obelisk.getSessionCatalogue({ ...options(), quiet, offset: page * PAGE_SIZE, limit: PAGE_SIZE });
@@ -62,13 +62,30 @@ async function fetchPage(quiet, page, version) {
 watch(() => [state.query, state.projectFilter, state.sourceFilter, state.sortDesc, state.catalogueVersion],
   async (current, previous) => {
     const version = ++generation;
+    const filtersChanged = !previous || current.slice(0, 4).some((value, index) => value !== previous[index]);
     catalogueLoading.value = true;
     pending.clear();
-    pages.value = new Map();
-    totals.value = { normal: 0, quiet: 0 };
-    await Promise.all([fetchPage(false, 0, version), fetchPage(true, 0, version)]);
+    const requests = new Map([['false:0', [false, 0]], ['true:0', [true, 0]]]);
+    if (filtersChanged) {
+      pages.value = new Map();
+      totals.value = { normal: 0, quiet: 0 };
+    } else {
+      // Retain the mounted rows and list height while refresh IPC is pending.
+      // Discard offscreen pages so revisiting them fetches the new generation.
+      const retained = new Map();
+      for (const item of virtualRows.value) {
+        const request = pageForRow(item.index);
+        if (!request) continue;
+        const [quiet, page] = request;
+        const key = `${quiet}:${page}`;
+        requests.set(key, request);
+        if (pages.value.has(key)) retained.set(key, pages.value.get(key));
+      }
+      pages.value = retained;
+    }
+    await Promise.all([...requests.values()].map(([quiet, page]) => fetchPage(quiet, page, version, true)));
     if (version === generation) catalogueLoading.value = false;
-    if (version === generation && previous && current.slice(0, 4).some((value, index) => value !== previous[index])) {
+    if (version === generation && previous && filtersChanged) {
       await nextTick();
       scrollElement.value?.scrollTo(0, 0);
     }
@@ -95,14 +112,18 @@ function rowAt(index) {
   return pages.value.get(`${!normal}:${Math.floor(offset / PAGE_SIZE)}`)?.[offset % PAGE_SIZE] || null;
 }
 
+function pageForRow(index) {
+  const normal = index < totals.value.normal;
+  const offset = normal ? index : index - totals.value.normal - 2;
+  return offset >= 0 && (normal || offset < totals.value.quiet)
+    ? [!normal, Math.floor(offset / PAGE_SIZE)] : null;
+}
+
 watch(virtualRows, rows => {
   const version = generation;
   for (const item of rows) {
-    const normal = item.index < totals.value.normal;
-    const offset = normal ? item.index : item.index - totals.value.normal - 2;
-    if (offset >= 0 && (normal || offset < totals.value.quiet)) {
-      void fetchPage(!normal, Math.floor(offset / PAGE_SIZE), version);
-    }
+    const request = pageForRow(item.index);
+    if (request) void fetchPage(...request, version);
   }
 }, { immediate: true });
 

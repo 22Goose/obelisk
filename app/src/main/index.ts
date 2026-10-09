@@ -219,6 +219,12 @@ function openDb(
   if (!fs.existsSync(dbPath)) return null;
   db = new Database(dbPath, { readonly: false });
   db.pragma('busy_timeout = 5000');
+  // Match the catalogue's original JavaScript substring semantics, including
+  // Unicode case conversion and literal %, _ and backslashes.
+  db.function('catalogue_contains', { deterministic: true },
+    (title: string | null, project: string | null, branch: string | null, query: string) =>
+      title?.toLowerCase().includes(query) || project?.toLowerCase().includes(query)
+        || branch?.toLowerCase().includes(query) ? 1 : 0);
   const lease = writerLeaseMode === 'acquire' ? acquireAppWriterLease(dbPath) : null;
   if (writerLeaseMode === 'caller-held' || lease) {
     try {
@@ -732,11 +738,10 @@ ipcMain.handle('db:getSessionCatalogue', (_, opts: SessionCatalogueOptions = {})
   if (opts.project && opts.project !== 'all') { clauses.push('project = ?'); params.push(opts.project); }
   if (opts.quiet) clauses.push("(title IS NULL OR title = '')");
   else clauses.push("title IS NOT NULL AND title != ''");
-  const query = opts.query?.trim();
+  const query = opts.query?.trim().toLowerCase();
   if (query) {
-    const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
-    clauses.push("(title LIKE ? ESCAPE '\\' OR project LIKE ? ESCAPE '\\' OR git_branch LIKE ? ESCAPE '\\')");
-    params.push(pattern, pattern, pattern);
+    clauses.push('catalogue_contains(title, project, git_branch, ?)');
+    params.push(query);
   }
   const where = `WHERE ${clauses.join(' AND ')}`;
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM sessions ${where}`).get(...params) as { count: number }).count;
