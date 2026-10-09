@@ -1279,23 +1279,23 @@ async function run() {
     const gaps = [];
     const startedAt = performance.now();
     let previous = startedAt;
+    let maxGeometrySampleMs = 0;
     let previousGeometry = null;
     let maxResidualMotion = 0;
     let residualExample = null;
     wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: -70, bubbles: true }));
     void window.obelisk.getSessionSummaries('scroll-gesture-probe');
     function sampleGeometry(now) {
+      const sampleStartedAt = performance.now();
       const wrapRect = wrap.getBoundingClientRect();
       const scrollTop = wrap.scrollTop;
-      const rows = new Map([...document.querySelectorAll('.virtual-timeline-row')]
-        .map(row => {
-          const rect = row.getBoundingClientRect();
-          const uuid = row.querySelector('[data-uuid]')?.getAttribute('data-uuid');
-          return uuid && rect.bottom > wrapRect.top && rect.top < wrapRect.bottom
-            ? [uuid, rect.top - wrapRect.top]
-            : null;
-        })
-        .filter(Boolean));
+      const rows = new Map();
+      for (const row of document.querySelectorAll('.virtual-timeline-row')) {
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom <= wrapRect.top || rect.top >= wrapRect.bottom) continue;
+        const uuid = row.querySelector('[data-uuid]')?.getAttribute('data-uuid');
+        if (uuid) rows.set(uuid, rect.top - wrapRect.top);
+      }
       if (previousGeometry) {
         for (const [uuid, top] of rows) {
           if (!previousGeometry.rows.has(uuid)) continue;
@@ -1309,6 +1309,7 @@ async function run() {
         }
       }
       previousGeometry = { rows, scrollTop };
+      maxGeometrySampleMs = Math.max(maxGeometrySampleMs, performance.now() - sampleStartedAt);
     }
     function frame(now) {
       gaps.push(now - previous);
@@ -1344,6 +1345,7 @@ async function run() {
           maxResidualMotion,
           residualExample,
           maxFrameGap: Math.max(...gaps),
+          maxGeometrySampleMs,
           frames: gaps.length,
           rows: document.querySelectorAll('.virtual-timeline-row').length,
           distanceFromTail: wrap.scrollHeight - wrap.clientHeight - wrap.scrollTop,
