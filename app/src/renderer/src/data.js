@@ -153,6 +153,13 @@ export function getCachedSessionDetail(sessionId) {
   });
 }
 
+/** Publish the accepted route's metadata without retaining another transcript. */
+export function commitActiveSessionMetadata(session) {
+  if (!session) return;
+  state.sessions = [sessionMetadata(session)];
+  state.sessionTitleOverrides.delete(session.id);
+}
+
 function commitSessionDetail(sessionId, { messages, workflows = [], summaries = [] }, { updateStore, metadata = null }) {
   const session = state.sessions.find(candidate => candidate.id === sessionId);
   const assembled = {

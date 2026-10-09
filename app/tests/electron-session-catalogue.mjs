@@ -26,6 +26,15 @@ const pageBytes = [];
 let releaseCatalogue;
 let pageGate = Promise.resolve();
 let releasePageGate;
+let releaseActivityMonth;
+let activityMonthGate = Promise.resolve();
+let activityMonthReplies = 0;
+const today = new Date();
+const firstDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+const activityDay = { id: 'activity-first-day', title: 'Selected first-day session', project: 'active',
+  started_at: `${firstDay}T12:00:00Z`, message_count: 1, has_earlier: 1 };
+const activityOtherDay = { ...activityDay, id: 'activity-other-day', title: 'Other-day session',
+  started_at: `${firstDay.slice(0, 8)}02T12:00:00Z` };
 const catalogueReady = new Promise(resolve => { releaseCatalogue = resolve; });
 let catalogueReleased = false;
 const errors = [];
@@ -61,6 +70,36 @@ async function search(win, text) {
   })()`);
 }
 
+async function checkActivityDayRefresh(win) {
+  await win.webContents.executeJavaScript("window.location.hash = '#/activity'");
+  await check(win, `document.querySelector('.session-activity')?.textContent.includes('Other-day session')`,
+    'Activity initially displays the monthly ledger');
+  await win.webContents.executeJavaScript("document.querySelector('.heatmap .heatmap-cell.level-4').dispatchEvent(new MouseEvent('click', { bubbles: true }))");
+  const dayLedger = `document.querySelector('.session-activity')?.textContent`;
+  await check(win, `${dayLedger}?.includes('Selected first-day session') && !${dayLedger}?.includes('Other-day session')`,
+    'selecting the first day restricts the ledger to that day');
+
+  activityMonthGate = new Promise(resolve => { releaseActivityMonth = resolve; });
+  activityDay.title = 'Refreshed first-day session';
+  const repliesBefore = activityMonthReplies;
+  win.webContents.send('obelisk:index-updated', {});
+  await check(win, `${dayLedger}?.includes('Refreshed first-day session')`,
+    'the daily refresh settles while its monthly refresh is pending');
+  releaseActivityMonth();
+  activityMonthGate = Promise.resolve();
+  const deadline = Date.now() + 10_000;
+  while (activityMonthReplies === repliesBefore && Date.now() < deadline) await delay(30);
+  assert.ok(activityMonthReplies > repliesBefore, 'the delayed monthly refresh completes');
+  await delay(200);
+  const ledger = await win.webContents.executeJavaScript(`({
+    text: ${dayLedger}, count: document.querySelector('.activity-month-count')?.textContent,
+  })`);
+  assert.ok(ledger.text.includes('Refreshed first-day session') && !ledger.text.includes('Other-day session'),
+    'a late monthly refresh cannot put other dates into the selected-day ledger');
+  assert.equal(ledger.count, '1 session', 'a late monthly refresh cannot change the selected-day count');
+  console.log('PASS: selected first-day activity survives a late monthly refresh');
+}
+
 async function run() {
   handle('db:getSessions', async (_event, opts = {}) => {
     calls.push(['sessions', opts]);
@@ -94,6 +133,15 @@ async function run() {
     handle(`db:getSession${name}`, () => []);
   }
   handle('db:getMemories', () => []);
+  handle('db:getUsageStats', () => ({ daily: [
+    { day: firstDay, tokens: 1 }, { day: activityOtherDay.started_at.slice(0, 10), tokens: 0 },
+  ], totalTokens: 1 }));
+  handle('db:getActivitySessions', async (_event, opts) => {
+    if (opts.from.includes('T')) return { rows: [{ ...activityDay }], total: 1 };
+    await activityMonthGate;
+    activityMonthReplies++;
+    return { rows: [{ ...activityDay }, activityOtherDay], total: 2 };
+  });
   handle('db:getStats', (_event, opts) => {
     calls.push(['stats', opts]);
     return { sessions: opts?.source === 'all' ? sessions.length : 50_003 };
@@ -258,6 +306,7 @@ async function run() {
     })()`);
     console.log(`BENCH 100005 rows: full IPC=${Buffer.byteLength(JSON.stringify(sessions))} bytes / clone median=${measureClone(sessions)} ms; page IPC max=${Math.max(...pageBytes)} bytes / clone median=${measureClone(sample)} ms; bare DOM construction=${bareDomMs} ms / virtual DOM rows browsing=${browseRows} quiet=${quietRows}; list navigation=${Math.round(browseMs)} ms`);
   }
+  await checkActivityDayRefresh(win);
   assert.deepEqual(errors, [], 'renderer has no console errors');
   win.destroy();
 }
@@ -268,6 +317,7 @@ app.whenReady().then(run).catch(error => {
 }).finally(() => {
   releaseCatalogue();
   releasePageGate?.();
+  releaseActivityMonth?.();
   for (const channel of channels) ipcMain.removeHandler(channel);
   app.exit(failed ? 1 : 0);
 });

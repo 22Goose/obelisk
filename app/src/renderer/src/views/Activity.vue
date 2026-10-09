@@ -31,7 +31,8 @@ async function fetchActivity(from, to, offset = 0) {
   next.set(from, { ...page, offset });
   while (next.size > 7) next.delete(next.keys().next().value);
   activityPages.value = next;
-  if (selectedDayKey.value && from.startsWith(selectedDayKey.value)) dayPage.value = { ...page, offset };
+  const selectedDay = daySessions.value;
+  if (selectedDay && from === selectedDay.from && to === selectedDay.to) dayPage.value = { ...page, offset };
 }
 
 function activityBlock(page, from, to, header) {

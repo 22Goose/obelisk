@@ -6,6 +6,7 @@ import { ref, shallowRef, computed, reactive, onMounted, onBeforeUnmount, onUnmo
 import { useRouter, useRoute } from 'vue-router';
 import { state, FOLDER_SVG, getSessionSummary } from '../store.js';
 import {
+  commitActiveSessionMetadata,
   fetchSessionDetailPatch,
   getCachedSessionDetail,
   loadSessionDetail,
@@ -253,6 +254,7 @@ async function loadMessages({ force = false } = {}) {
   try {
     const latest = await fetchSessionSnapshot(requestedSessionId, { force });
     if (revision !== loadRevision || requestedSessionId !== props.id) return;
+    commitActiveSessionMetadata(latest);
     await commitSessionSnapshot(latest);
     committed = true;
   } finally {

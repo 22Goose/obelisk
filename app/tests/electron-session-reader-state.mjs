@@ -100,7 +100,8 @@ async function waitFor(webContents, expression, message, timeoutMs = 8_000) {
 }
 
 function registerHandlers() {
-  ipcMain.handle('db:getSessions', () => [summary(sessionA), summary(sessionB)]);
+  ipcMain.handle('db:getSessions', (_event, opts = {}) => opts.sessionId
+    ? [summary(opts.sessionId)] : [summary(sessionA), summary(sessionB)]);
   ipcMain.handle('db:getSessionCatalogue', (_event, opts) => ({
     rows: opts.quiet ? [] : [summary(sessionA), summary(sessionB)].slice(opts.offset, opts.offset + opts.limit),
     total: opts.quiet ? 0 : 2,
@@ -148,6 +149,14 @@ async function navigate(win, sessionId, query = '') {
     `${sessionId} timeline`,
   );
   await delay(650);
+  const routeMetadata = await win.webContents.executeJavaScript(`({
+    breadcrumb: document.querySelector('#breadcrumb')?.textContent,
+    title: document.title,
+  })`, true);
+  assert(routeMetadata.breadcrumb?.includes(fixtures[sessionId].title),
+    `${sessionId} navigation restores its breadcrumb title`);
+  assert(routeMetadata.title.includes(fixtures[sessionId].title),
+    `${sessionId} navigation restores its window title`);
 }
 
 async function scrollState(win, fraction = null) {
@@ -204,6 +213,8 @@ async function run() {
   await win.loadFile(join(appRoot, 'out', 'renderer', 'index.html'), { hash: '/sessions' });
   await waitFor(win.webContents, `document.body.textContent.includes('Reader state A')`, 'session list');
 
+  await navigate(win, sessionA);
+  await navigate(win, sessionB);
   await navigate(win, sessionA);
   await waitFor(win.webContents, `document.querySelector('[data-uuid="a-message-2"] .truncated-btn')`,
     'session A truncated message is mounted');
