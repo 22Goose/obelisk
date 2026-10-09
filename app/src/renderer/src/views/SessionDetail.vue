@@ -226,7 +226,7 @@ onUnmounted(() => {
 });
 
 watch(() => session.value?.id, async sessionId => {
-  if (sessionId === props.id && messages.value.length === 0) {
+  if (sessionId === props.id && messages.value.length === 0 && !loading.value) {
     await loadMessages({ force: true });
   }
 });

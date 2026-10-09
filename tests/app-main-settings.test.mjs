@@ -957,6 +957,8 @@ test('session catalogue includes older sessions beyond 1000 across providers and
       i % 2 ? 'codex' : 'claude', new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString());
   }
   setup.exec('COMMIT');
+  setup.exec("UPDATE sessions SET started_at = '2026-01-01T00:00:00.000Z' WHERE CAST(SUBSTR(id, 11) AS INTEGER) < 10");
+  setup.exec("UPDATE sessions SET git_branch = 'old-release' WHERE id = 'catalogue-1'");
   setup.close();
   const ipcHandlers = new Map();
   const appHandlers = new Map();
@@ -1000,6 +1002,24 @@ test('session catalogue includes older sessions beyond 1000 across providers and
     const projects = ipcHandlers.get('db:getProjects')(null, { source: 'all' });
     assert.equal(projects.find(p => p.project === 'older-only').session_count, 5);
     assert.equal(projects.reduce((sum, p) => sum + p.session_count, 0), 1105);
+    const page = opts => ipcHandlers.get('db:getSessionCatalogue')(null, { source: 'all', ...opts });
+    assert.equal(page({ limit: 1000 }).rows.length, 100, 'untrusted IPC cannot request an unbounded page');
+    assert.equal(page({ offset: 1000, limit: 100 }).rows[0].id, 'catalogue-104');
+    assert.equal(page({ offset: 1100 }).rows.at(-1).id, 'catalogue-0');
+    assert.deepEqual(page({ query: 'session 1', project: 'older-only', descending: false }).rows.map(s => s.id), ['catalogue-1']);
+    assert.equal(page({ source: 'codex', project: 'older-only' }).total, 2);
+    assert.deepEqual(page({ query: 'old-release' }).rows.map(s => s.id), ['catalogue-1']);
+    const lastPage = page({ offset: 1100, limit: 5 }).rows.map(s => s.id);
+    const previousPage = page({ offset: 1095, limit: 5 }).rows.map(s => s.id);
+    assert.equal(new Set([...previousPage, ...lastPage]).size, 10, 'tied timestamps across pages have no duplicates');
+    assert.equal(previousPage.at(-1), 'catalogue-5');
+    assert.equal(lastPage[0], 'catalogue-4');
+    assert.deepEqual([...lastPage].slice(-2), ['catalogue-1', 'catalogue-0']);
+    assert.deepEqual(page({ offset: 1105, limit: 5, descending: false }).rows, []);
+    assert.deepEqual(page({ offset: 0, limit: 2, descending: false }).rows.map(s => s.id), ['catalogue-0', 'catalogue-1']);
+    const activity = ipcHandlers.get('db:getActivitySessions')(null, { from: '2026-01-01', to: '2026-01-02' });
+    assert.ok(activity.total >= 2);
+    assert.equal(activity.rows.length, Math.min(200, activity.total));
   } finally {
     restore();
     restoreEnvVar('HOME', originalHome);
@@ -1091,6 +1111,12 @@ test('main process migrates an existing app database before source-filtered IPC 
       memories: 0,
       memoriesArchived: 0,
     });
+    const migrated = new DatabaseSync(dbPath);
+    assert.ok(migrated.prepare('PRAGMA index_list(sessions)').all().some(index => index.name === 'idx_sessions_catalogue_order'));
+    assert.ok(migrated.prepare(`EXPLAIN QUERY PLAN SELECT id FROM sessions
+      ORDER BY COALESCE(ended_at, started_at) DESC, id DESC LIMIT 100`).all()
+      .some(step => step.detail.includes('idx_sessions_catalogue_order')));
+    migrated.close();
   } finally {
     restore();
     restoreEnvVar('HOME', originalHome);
