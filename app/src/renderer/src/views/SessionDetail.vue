@@ -226,7 +226,7 @@ onUnmounted(() => {
 });
 
 watch(() => session.value?.id, async sessionId => {
-  if (sessionId === props.id && messages.value.length === 0) {
+  if (sessionId === props.id && messages.value.length === 0 && !loading.value) {
     await loadMessages({ force: true });
   }
 });
@@ -303,7 +303,7 @@ async function loadLiveSnapshot() {
   const patchRequest = await fetchSessionDetailPatch(sessionId);
   // Decode IPC and publish reactive rows in separate tasks. Yield here so the
   // coordinator can also recheck scroll ownership before any visible commit.
-  await new Promise(resolve => setTimeout(resolve, 0));
+  await scheduler.yield();
   return { sessionId, revision, patchRequest };
 }
 

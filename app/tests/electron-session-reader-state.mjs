@@ -13,6 +13,7 @@ const focusUuid = 'a-message-180';
 const expandedTextSentinel = 'RESTORED FULL TEXT SENTINEL';
 const channels = [
   'db:getSessions',
+  'db:getSessionCatalogue',
   'db:getSessionMessages',
   'db:getSessionToolCalls',
   'db:getSessionToolResults',
@@ -100,6 +101,10 @@ async function waitFor(webContents, expression, message, timeoutMs = 8_000) {
 
 function registerHandlers() {
   ipcMain.handle('db:getSessions', () => [summary(sessionA), summary(sessionB)]);
+  ipcMain.handle('db:getSessionCatalogue', (_event, opts) => ({
+    rows: opts.quiet ? [] : [summary(sessionA), summary(sessionB)].slice(opts.offset, opts.offset + opts.limit),
+    total: opts.quiet ? 0 : 2,
+  }));
   ipcMain.handle('db:getSessionMessages', (_event, sessionId) => fixtures[sessionId]?.messages || []);
   ipcMain.handle('db:getSessionToolCalls', (_event, sessionId) => fixtures[sessionId]?.toolCalls || []);
   ipcMain.handle('db:getSessionToolResults', (_event, sessionId) => fixtures[sessionId]?.toolResults || []);
@@ -127,8 +132,8 @@ function registerHandlers() {
     return messageUuid === 'a-message-2' ? `${expandedTextSentinel} complete message` : null;
   });
   ipcMain.handle('db:getMemories', () => []);
-  ipcMain.handle('db:getProjects', () => [{ project: 'quiet-zero', count: 2 }]);
-  ipcMain.handle('db:getStats', () => ({}));
+  ipcMain.handle('db:getProjects', () => [{ project: 'quiet-zero', session_count: 2 }]);
+  ipcMain.handle('db:getStats', () => ({ sessions: 2 }));
   ipcMain.handle('settings:get', () => ({}));
 }
 
@@ -200,6 +205,8 @@ async function run() {
   await waitFor(win.webContents, `document.body.textContent.includes('Reader state A')`, 'session list');
 
   await navigate(win, sessionA);
+  await waitFor(win.webContents, `document.querySelector('[data-uuid="a-message-2"] .truncated-btn')`,
+    'session A truncated message is mounted');
   await win.webContents.executeJavaScript(
     `document.querySelector('[data-view-key="tool:a-tool-call"] .toolcall-toggle')?.click()`,
     true,

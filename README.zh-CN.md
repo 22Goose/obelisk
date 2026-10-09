@@ -9,7 +9,7 @@
 [![version](https://img.shields.io/github/v/tag/tommy0103/obelisk?label=version&style=flat-square)](https://github.com/tommy0103/obelisk/releases)
 [![license](https://img.shields.io/badge/license-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
 
-你的 Claude Code、Codex、GitHub Copilot、DeepSeek Harness、Hermes Agent、Kimi Code、OMP、Pi、ZCode 历史会话——agent 快速查询，你浏览它们。
+你的 Claude Code、Codex、GitHub Copilot、DeepSeek Harness、Hermes Agent、Kiro、Kimi Code、OMP、Pi、ZCode 历史会话——agent 快速查询，你浏览它们。
 
 [English](README.md) · **中文**
 
@@ -147,8 +147,8 @@ npm run dev
 | **Sessions** | 标题、项目、时间戳、git 分支、来源 | 全部 |
 | **Messages** | 完整文本、模型、token 用量、父子链 | 全部 |
 | **Tool calls** | 工具名、输入、文件路径 | 全部 |
-| **Subagents** | agent 类型、描述、完整对话 | Claude Code、Codex、DeepSeek Harness、Hermes Agent、Kimi Code、ZCode |
-| **Summaries** | provider 自己产生的会话摘要 | Kimi Code |
+| **Subagents** | agent 类型、描述、完整对话 | Claude Code、Codex、DeepSeek Harness、Hermes Agent、Kiro V3、Kimi Code、ZCode |
+| **Summaries** | provider 自己产生的会话摘要 | Kiro V3、Kimi Code |
 | **Workflows** | workflow 脚本、结果、每个 agent 的记录 | Claude Code |
 | **Memories** | 结论及其来源会话 | 注册的 markdown 文件 |
 
@@ -167,6 +167,7 @@ provider 前缀，不会撞。
 | GitHub Copilot | VS Code `User` 数据目录（Chronicle 存储 + workspace transcripts） |
 | DeepSeek Harness | `~/.dsh/sessions`（或 `$DSH_HOME/sessions`） |
 | Hermes Agent | `~/.hermes/state.db`（或 `$HERMES_HOME/state.db`） |
+| Kiro | `~/.kiro/sessions` 和平台 `kiro-cli/data.sqlite3` 数据库 |
 | Kimi Code | `~/.kimi-code/sessions`（或 `$KIMI_CODE_HOME/sessions`） |
 | OMP | `~/.omp/agent/sessions` |
 | Pi | `~/.pi/agent/sessions` |

@@ -42,21 +42,20 @@ function commitStoredSessionMetadata(sessionId, metadata) {
 }
 
 /**
- * Fetch the global catalogue without mutating renderer state. Navigation can
+ * Fetch global aggregates without mutating renderer state. Navigation can
  * then gate a reply that started before SessionDetail became active.
  */
 export async function fetchInitialData() {
-  const [rawMemories, rawSessions, stats, projects] = await Promise.all([
+  const [rawMemories, stats, projects] = await Promise.all([
     window.obelisk.getMemories(),
-    window.obelisk.getSessions({ source: 'all', limit: null }),
     window.obelisk.getStats({ source: 'all' }),
     window.obelisk.getProjects({ source: 'all' })
   ]);
-  return { rawMemories, rawSessions, stats, projects };
+  return { rawMemories, stats, projects };
 }
 
-/** Commit a fetched global catalogue snapshot to shared renderer state. */
-export function commitInitialData({ rawMemories, rawSessions, stats, projects }) {
+/** Commit fetched aggregates; list pages are owned by the mounted list. */
+export function commitInitialData({ rawMemories, stats, projects }) {
   // Transform memories: DB records -> render-layer shape
   state.memories = (rawMemories || []).map(m => ({
     ...m,
@@ -67,21 +66,9 @@ export function commitInitialData({ rawMemories, rawSessions, stats, projects })
     markdown: null  // loaded on demand via loadMemoryMarkdown
   }));
 
-  // The catalogue now owns the latest metadata; route overlays can retire.
-  state.sessionTitleOverrides.clear();
-
-  // Sessions: merge with existing data to preserve already-loaded messages
-  const existingSessions = new Map(state.sessions.map(s => [s.id, s]));
-  state.sessions = (rawSessions || []).map(s => {
-    const existing = existingSessions.get(s.id);
-    return {
-      ...s,
-      messages: existing?.messages?.length ? existing.messages : []
-    };
-  });
-
   state.projects = projects || [];
   state.stats = stats || {};
+  state.catalogueVersion++;
   state.loaded = true;
 }
 
@@ -181,6 +168,7 @@ function commitSessionDetail(sessionId, { messages, workflows = [], summaries = 
   if (updateStore) {
     const index = state.sessions.findIndex(candidate => candidate.id === sessionId);
     if (index !== -1) state.sessions[index] = assembled;
+    else state.sessions = [assembled];
   }
   return assembled;
 }

@@ -7,12 +7,13 @@ import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { performance } from 'node:perf_hooks';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Synthetic application metadata, not approximations of provider transcripts.
-const sessions = Array.from({ length: 1105 }, (_, i) => ({
+const sessions = Array.from({ length: 100_005 }, (_, i) => ({
   id: `catalogue-${i}`,
-  title: i === 0 ? 'Oldest searchable session' : `Catalogue session ${i}`,
+  title: i === 0 ? 'Oldest searchable session' : i === 1 ? 'Deep searchable title' : i % 10 === 0 ? null : `Catalogue session ${i}`,
   project: i < 5 ? 'older-only' : 'active',
   source: i % 2 ? 'codex' : 'claude',
   started_at: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
@@ -21,6 +22,7 @@ const sessions = Array.from({ length: 1105 }, (_, i) => ({
 })).reverse();
 const channels = [];
 const calls = [];
+const pageBytes = [];
 let releaseCatalogue;
 const catalogueReady = new Promise(resolve => { releaseCatalogue = resolve; });
 let catalogueReleased = false;
@@ -66,6 +68,21 @@ async function run() {
     if (opts.limit !== null) rows = rows.slice(0, opts.limit ?? 200);
     return rows;
   });
+  handle('db:getSessionCatalogue', async (_event, opts = {}) => {
+    calls.push(['catalogue', opts]);
+    await catalogueReady;
+    assert.ok(opts.limit > 0 && opts.limit <= 100 && opts.offset >= 0);
+    const q = (opts.query || '').trim().toLowerCase();
+    const matches = sessions.filter(s => (opts.source === 'all' || (s.source || 'claude') === (opts.source || 'claude'))
+      && (!opts.project || opts.project === 'all' || opts.project === s.project)
+      && Boolean(!s.title) === Boolean(opts.quiet)
+      && (!q || [s.title, s.project, s.git_branch].some(value => value?.toLowerCase().includes(q))));
+    if (opts.descending === false) matches.reverse();
+    const result = { rows: matches.slice(opts.offset, opts.offset + opts.limit), total: matches.length };
+    assert.ok(result.rows.length <= 100);
+    pageBytes.push(Buffer.byteLength(JSON.stringify(result)));
+    return result;
+  });
   handle('db:getSessionMessages', (_event, id) => sessions.some(s => s.id === id) ? [{
     uuid: `${id}-message`, type: 'user', role: 'user', timestamp: '2026-01-01T00:00:00Z',
     text: `Evidence for ${id}`, content_type: 'text', visibility: 'visible',
@@ -76,11 +93,11 @@ async function run() {
   handle('db:getMemories', () => []);
   handle('db:getStats', (_event, opts) => {
     calls.push(['stats', opts]);
-    return { sessions: opts?.source === 'all' ? sessions.length : 553 };
+    return { sessions: opts?.source === 'all' ? sessions.length : 50_003 };
   });
   handle('db:getProjects', (_event, opts) => {
     calls.push(['projects', opts]);
-    return [{ project: 'active', session_count: 1100 }, { project: 'older-only', session_count: 5 }];
+    return [{ project: 'active', session_count: 100_000 }, { project: 'older-only', session_count: 5 }];
   });
   handle('settings:get', () => ({ sources: [
     { id: 'claude', label: 'Claude Code', status: 'connected' },
@@ -107,14 +124,20 @@ async function run() {
 
   catalogueReleased = true;
   releaseCatalogue();
-  await check(win, `${badge} === '1105'`, 'the Sessions badge counts all 1105 indexed sessions');
-  assert.ok(calls.some(([kind, opts]) => kind === 'sessions' && opts?.source === 'all' && opts.limit === null));
+  await check(win, `${badge} === '100005'`, 'the Sessions badge counts all 100005 indexed sessions');
+  assert.ok(!calls.some(([kind, opts]) => kind === 'sessions' && opts?.limit === null));
   assert.ok(calls.some(([kind, opts]) => kind === 'stats' && opts?.source === 'all'));
   assert.ok(calls.some(([kind, opts]) => kind === 'projects' && opts?.source === 'all'));
+  const browseStart = performance.now();
   await win.webContents.executeJavaScript("window.location.hash = '#/sessions'");
-  await check(win, `${rows}.length === 1105`, 'browsing includes every session beyond the first 1000');
-  await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-1104'`,
+  await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-100004'`,
     'newest-first sorting covers the complete history');
+  const browseMs = performance.now() - browseStart;
+  await win.webContents.executeJavaScript("document.querySelector('.session-scroll').scrollTop = 200000");
+  await check(win, `${rows}.length > 0 && [...${rows}].some(el => Number(el.dataset.sessionId.split('-')[1]) < 99000)`,
+    'scrolling reaches sessions beyond the first 1000');
+  const browseRows = await win.webContents.executeJavaScript(`${rows}.length`);
+  assert.ok(browseRows < 80, 'DOM row count remains bounded while browsing');
   await win.webContents.executeJavaScript("document.querySelector('#sort-toggle').click()");
   await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-0'`,
     'oldest-first sorting reaches the actual oldest session');
@@ -122,11 +145,14 @@ async function run() {
   await search(win, 'Oldest searchable');
   await check(win, `${rows}.length === 1 && document.querySelector('.srow')?.dataset.sessionId === 'catalogue-0'`,
     'metadata search finds a titled session beyond the former cutoff');
+  await search(win, 'Deep searchable title');
+  await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-1'`,
+    'database search reaches another old session');
   if (process.env.OBELISK_CATALOGUE_SCREENSHOT) {
     await writeFile(process.env.OBELISK_CATALOGUE_SCREENSHOT, (await win.webContents.capturePage()).toPNG());
   }
   await search(win, '');
-  await check(win, `${rows}.length === 1105`, 'clearing the search restores the full catalogue');
+  await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-0'`, 'clearing search restores oldest-first order');
   const oldProject = `[...document.querySelectorAll('#sidebar-projects .sidebar-item')].find(el => el.textContent.includes('older-only'))`;
   await check(win, `${oldProject}?.querySelector('.badge')?.textContent === '5'`, 'an older-only project remains visible with its full count');
   await win.webContents.executeJavaScript(`${oldProject}.click()`);
@@ -138,6 +164,55 @@ async function run() {
   await win.webContents.executeJavaScript(`document.querySelector('[data-session-id="catalogue-1"]').click()`);
   await check(win, `document.querySelector('[data-uuid="catalogue-1-message"]')`,
     'an older result opens its real session detail');
+  await win.webContents.executeJavaScript("window.location.hash = '#/sessions'");
+  await check(win, `document.querySelector('.project-crumb')`, 'returning from detail retains the project filter');
+  await win.webContents.executeJavaScript("document.querySelector('.breadcrumb .crumb').click()");
+  await win.webContents.executeJavaScript("document.querySelector('.source-filter-wrap .filter-btn').click()");
+  await win.webContents.executeJavaScript(`[...document.querySelectorAll('.fd-row')].find(el => el.textContent.includes('Claude')).click()`);
+  await search(win, '');
+  await check(win, `document.querySelector('.srow')?.dataset.sessionId === 'catalogue-0'`, 'all-project list reloads');
+  await win.webContents.executeJavaScript("document.querySelector('.session-scroll').scrollTop = document.querySelector('.session-scroll').scrollHeight");
+  await check(win, `document.querySelector('.fold-banner')`, 'quiet fold is reachable without mounting the whole list');
+  await win.webContents.executeJavaScript("document.querySelector('.fold-banner').click()");
+  await win.webContents.executeJavaScript("document.querySelector('.session-scroll').scrollTop = document.querySelector('.session-scroll').scrollHeight");
+  await check(win, `${rows}.length > 0 && ${rows}.length < 80 && document.querySelector('.srow.noise')`,
+    'expanded quiet sessions are virtualized and reachable');
+  const quietRows = await win.webContents.executeJavaScript(`${rows}.length`);
+  const quietId = await win.webContents.executeJavaScript(`(() => {
+    const row = document.querySelector('.srow.noise');
+    const id = row.dataset.sessionId;
+    row.click();
+    return id;
+  })()`);
+  await check(win, `document.querySelector('[data-uuid="${quietId}-message"]')`, 'expanded quiet session opens its detail');
+  assert.ok(calls.filter(([kind]) => kind === 'catalogue').every(([, opts]) => opts.limit <= 100), 'catalogue IPC stays bounded');
+  assert.ok(Math.max(...pageBytes) < 100_000, 'no catalogue response transfers an unbounded IPC payload');
+  if (process.env.OBELISK_CATALOGUE_BENCH) {
+    const sample = sessions.slice(0, 100);
+    const measureClone = value => {
+      const timings = [];
+      for (let i = 0; i < 5; i++) {
+        const start = performance.now();
+        structuredClone(value);
+        timings.push(Math.round(performance.now() - start));
+      }
+      return timings.sort((a, b) => a - b)[2];
+    };
+    const bareDomMs = await win.webContents.executeJavaScript(`(() => {
+      const start = performance.now();
+      const container = document.createElement('div');
+      for (let i = 0; i < 100005; i++) {
+        const row = document.createElement('div');
+        row.className = 'srow';
+        row.textContent = 'Catalogue session ' + i;
+        container.appendChild(row);
+      }
+      const elapsed = performance.now() - start;
+      container.remove();
+      return Math.round(elapsed);
+    })()`);
+    console.log(`BENCH 100005 rows: full IPC=${Buffer.byteLength(JSON.stringify(sessions))} bytes / clone median=${measureClone(sessions)} ms; page IPC max=${Math.max(...pageBytes)} bytes / clone median=${measureClone(sample)} ms; bare DOM construction=${bareDomMs} ms / virtual DOM rows browsing=${browseRows} quiet=${quietRows}; list navigation=${Math.round(browseMs)} ms`);
+  }
   assert.deepEqual(errors, [], 'renderer has no console errors');
   win.destroy();
 }

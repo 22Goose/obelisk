@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { acquireWriterLease } from '../packages/core/src/writer-lease.ts';
+import { defaultKiroDatabasePath } from '../packages/core/src/providers/kiro.ts';
 import { defaultCopilotUserDataRoots } from '../packages/core/src/providers/copilot.ts';
 import { makeTempDir } from './temp-dirs.mjs';
 
@@ -145,6 +146,7 @@ function defaultIndexerWorkerClient() {
     createWorkerBuildIndex: () => ({
       buildIndex: async () => ({ files: 0, affectedSessionIds: [] }),
       readHermesMessageText: async () => null,
+      readKiroMessageText: async () => null,
       stop() {},
     }),
   };
@@ -267,13 +269,20 @@ test('main process watches every root declared by the built-in provider registry
 
   const serviceOptions = [];
   const workerCalls = [];
+  const ipcHandlers = new Map();
 
   class FakeDatabase {
     pragma() {}
     exec() {}
     close() {}
-    prepare() {
-      return { get: () => null, all: () => [], run: () => ({}) };
+    prepare(sql) {
+      return {
+        get: () => null,
+        all: () => sql.includes("GROUP BY COALESCE(source")
+          ? [{ source: 'copilot', session_count: 2, last_indexed: '2026-10-08' }]
+          : [],
+        run: () => ({}),
+      };
     }
   }
 
@@ -290,7 +299,10 @@ test('main process watches every root declared by the built-in provider registry
   }
 
   const restore = registerMocks([
-    [ELECTRON_URL, { namedExports: electronNamespace({ BrowserWindow: FakeBrowserWindow }) }],
+    [ELECTRON_URL, { namedExports: electronNamespace({
+      BrowserWindow: FakeBrowserWindow,
+      ipcMain: { handle(channel, handler) { ipcHandlers.set(channel, handler); } },
+    }) }],
     [DATABASE_URL, { defaultExport: FakeDatabase }],
     [WATCHER_URL, { namedExports: noopWatcher() }],
     [INDEXER_URL, { namedExports: { writeHeartbeat() {} } }],
@@ -342,6 +354,9 @@ test('main process watches every root declared by the built-in provider registry
       { kind: 'tree', path: join(home, '.hermes', 'profiles'), fileNames: ['state.db', 'state.db-wal'] },
       { kind: 'tree', path: join(home, '.kimi-code', 'sessions') },
       { kind: 'file', path: join(home, '.kimi-code', 'session_index.jsonl') },
+      { kind: 'tree', path: join(home, '.kiro', 'sessions') },
+      { kind: 'file', path: defaultKiroDatabasePath({ homeDir: home }) },
+      { kind: 'file', path: `${defaultKiroDatabasePath({ homeDir: home })}-wal` },
       { kind: 'tree', path: join(home, '.omp', 'agent', 'sessions') },
       { kind: 'tree', path: join(home, '.pi', 'agent', 'sessions') },
       { kind: 'file', path: join(home, '.zcode', 'cli', 'db', 'db.sqlite') },
@@ -350,6 +365,21 @@ test('main process watches every root declared by the built-in provider registry
     assert.equal(serviceOptions[0].watchTargets.some((t) => t.path === codexDir), false);
     await serviceOptions[0].buildIndex({ reason: 'settings-transfer' });
     assert.deepEqual(workerCalls[0].providerSettings, {});
+    mkdirSync(insidersCopilotRoot, { recursive: true });
+    const defaultSettings = await ipcHandlers.get('settings:get')();
+    assert.deepEqual(defaultSettings.copilotEditions.map((edition) => edition.enabled), [true, true]);
+    const copilotSource = defaultSettings.sources.find((source) => source.id === 'copilot');
+    assert.equal(copilotSource.exists, true);
+    assert.equal(copilotSource.sessionCount, 2);
+    assert.equal(copilotSource.status, 'ok', 'Insiders-only indexed history is connected without a warning');
+    assert.equal(copilotSource.statusText, 'Connected');
+    await ipcHandlers.get('settings:set')(null, 'copilotEditions.stable', false);
+    assert.deepEqual((await ipcHandlers.get('settings:get')()).copilotEditions.map((edition) => edition.enabled), [false, true]);
+    assert.equal(serviceOptions.length, 2);
+    assert.equal(serviceOptions[1].watchTargets.some((target) => target.path.startsWith(stableCopilotRoot)), false);
+    assert.equal(serviceOptions[1].watchTargets.some((target) => target.path.startsWith(insidersCopilotRoot)), true);
+    await serviceOptions[1].buildIndex({ reason: 'settings-transfer' });
+    assert.deepEqual(workerCalls[1].providerSettings.copilotEditions, { stable: false });
   } finally {
     restore();
     restoreEnvVar('HOME', originalHome);
@@ -618,6 +648,10 @@ test('usage IPC aggregates normalized tokens across all indexed providers', asyn
     .run('hermes:session', 'hermes', '/tmp/hermes/state.db#session:source');
   setup.prepare('INSERT INTO messages (uuid,session_id,type,role,text,source) VALUES (?,?,?,?,?,?)')
     .run('hermes:full-text', 'hermes:session', 'assistant', 'assistant', 'truncated Hermes text', 'hermes');
+  setup.prepare('INSERT INTO sessions (id,source,jsonl_path) VALUES (?,?,?)')
+    .run('kiro:session', 'kiro', '/workspace/kiro/sessions/cli/example.jsonl');
+  setup.prepare('INSERT INTO messages (uuid,session_id,type,role,text,source) VALUES (?,?,?,?,?,?)')
+    .run('kiro:full-text', 'kiro:session', 'assistant', 'assistant', 'truncated Kiro text', 'kiro');
   setup.prepare('INSERT INTO sessions (id,source) VALUES (?,?)')
     .run('zcode:child', 'zcode');
   setup.prepare('INSERT INTO messages (uuid,session_id,type,role,text,visibility,source,agent_id) VALUES (?,?,?,?,?,?,?,?)')
@@ -729,6 +763,12 @@ test('usage IPC aggregates normalized tokens across all indexed providers', asyn
           assert.equal(lookup.messageUuid, 'hermes:full-text');
           return 'complete Hermes text from worker';
         },
+        readKiroMessageText: async lookup => {
+          assert.equal(lookup.source, 'kiro');
+          assert.equal(lookup.messageUuid, 'kiro:full-text');
+          assert.equal(lookup.rootDir, join(home, '.kiro'));
+          return 'complete Kiro text from worker';
+        },
         stop() {},
       }),
     } }],
@@ -779,6 +819,8 @@ test('usage IPC aggregates normalized tokens across all indexed providers', asyn
       'complete ZCode text from worker');
     assert.equal(await ipcHandlers.get('db:getMessageFullText')(null, 'hermes:full-text'),
       'complete Hermes text from worker');
+    assert.equal(await ipcHandlers.get('db:getMessageFullText')(null, 'kiro:full-text'),
+      'complete Kiro text from worker');
 
     const claudeOnly = ipcHandlers.get('db:getUsageStats')(null, {});
     assert.equal(claudeOnly.totalTokens, 72);
@@ -915,6 +957,8 @@ test('session catalogue includes older sessions beyond 1000 across providers and
       i % 2 ? 'codex' : 'claude', new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString());
   }
   setup.exec('COMMIT');
+  setup.exec("UPDATE sessions SET started_at = '2026-01-01T00:00:00.000Z' WHERE CAST(SUBSTR(id, 11) AS INTEGER) < 10");
+  setup.exec("UPDATE sessions SET git_branch = 'old-release' WHERE id = 'catalogue-1'");
   setup.close();
   const ipcHandlers = new Map();
   const appHandlers = new Map();
@@ -958,6 +1002,24 @@ test('session catalogue includes older sessions beyond 1000 across providers and
     const projects = ipcHandlers.get('db:getProjects')(null, { source: 'all' });
     assert.equal(projects.find(p => p.project === 'older-only').session_count, 5);
     assert.equal(projects.reduce((sum, p) => sum + p.session_count, 0), 1105);
+    const page = opts => ipcHandlers.get('db:getSessionCatalogue')(null, { source: 'all', ...opts });
+    assert.equal(page({ limit: 1000 }).rows.length, 100, 'untrusted IPC cannot request an unbounded page');
+    assert.equal(page({ offset: 1000, limit: 100 }).rows[0].id, 'catalogue-104');
+    assert.equal(page({ offset: 1100 }).rows.at(-1).id, 'catalogue-0');
+    assert.deepEqual(page({ query: 'session 1', project: 'older-only', descending: false }).rows.map(s => s.id), ['catalogue-1']);
+    assert.equal(page({ source: 'codex', project: 'older-only' }).total, 2);
+    assert.deepEqual(page({ query: 'old-release' }).rows.map(s => s.id), ['catalogue-1']);
+    const lastPage = page({ offset: 1100, limit: 5 }).rows.map(s => s.id);
+    const previousPage = page({ offset: 1095, limit: 5 }).rows.map(s => s.id);
+    assert.equal(new Set([...previousPage, ...lastPage]).size, 10, 'tied timestamps across pages have no duplicates');
+    assert.equal(previousPage.at(-1), 'catalogue-5');
+    assert.equal(lastPage[0], 'catalogue-4');
+    assert.deepEqual([...lastPage].slice(-2), ['catalogue-1', 'catalogue-0']);
+    assert.deepEqual(page({ offset: 1105, limit: 5, descending: false }).rows, []);
+    assert.deepEqual(page({ offset: 0, limit: 2, descending: false }).rows.map(s => s.id), ['catalogue-0', 'catalogue-1']);
+    const activity = ipcHandlers.get('db:getActivitySessions')(null, { from: '2026-01-01', to: '2026-01-02' });
+    assert.ok(activity.total >= 2);
+    assert.equal(activity.rows.length, Math.min(200, activity.total));
   } finally {
     restore();
     restoreEnvVar('HOME', originalHome);
@@ -1049,6 +1111,12 @@ test('main process migrates an existing app database before source-filtered IPC 
       memories: 0,
       memoriesArchived: 0,
     });
+    const migrated = new DatabaseSync(dbPath);
+    assert.ok(migrated.prepare('PRAGMA index_list(sessions)').all().some(index => index.name === 'idx_sessions_catalogue_order'));
+    assert.ok(migrated.prepare(`EXPLAIN QUERY PLAN SELECT id FROM sessions
+      ORDER BY COALESCE(ended_at, started_at) DESC, id DESC LIMIT 100`).all()
+      .some(step => step.detail.includes('idx_sessions_catalogue_order')));
+    migrated.close();
   } finally {
     restore();
     restoreEnvVar('HOME', originalHome);
