@@ -9,6 +9,21 @@ changes behavior, compatibility, or scope. Respect decisions already made in the
 current discussion. This guidance works with the contributor's chosen agent and
 tools; it does not require a particular workflow skill.
 
+## Local fork workflow
+
+- Do not install WSL. Use GitHub Actions for CI verification instead.
+- Develop each new change on a new feature branch in this fork
+  (`22Goose/obelisk`), based on its `main` after syncing with upstream.
+- First open a PR from that branch to this fork's `main`. Wait for all
+  applicable GitHub Actions checks to pass; fix failures on the same branch
+  and re-run CI before proceeding.
+- Only after the fork PR's CI is green, open a PR to
+  `tommy0103/obelisk` (upstream). Follow its PR template and verification
+  contract; do not treat the fork's green checks as a substitute for upstream
+  checks on the final head.
+- Write all comments posted to upstream issues and PRs, including review
+  replies, in English. Do not post Chinese comments upstream.
+
 ## Before implementation
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), starting with its
