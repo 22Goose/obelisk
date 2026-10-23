@@ -11,7 +11,11 @@ tools; it does not require a particular workflow skill.
 
 ## Local fork workflow
 
-- Do not install WSL. Use GitHub Actions for CI verification instead.
+- Do not install or use WSL for tests. On Windows, do not run the full test
+  suite or POSIX shell-backed tests that may launch WSL via `sh`/`bash`. Run
+  explicitly selected Windows-compatible checks locally; leave Linux-only
+  checks to GitHub Actions on this fork (`22Goose/obelisk`) and report them as
+  untested locally until CI passes.
 - Develop each new change on a new feature branch in this fork
   (`22Goose/obelisk`), based on its `main` after syncing with upstream.
 - First open a PR from that branch to this fork's `main`. Wait for all

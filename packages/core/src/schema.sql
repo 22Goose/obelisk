@@ -55,6 +55,9 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
   VALUES (new.rowid, new.uuid, new.session_id, new.text);
 END;
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session_cwd_timestamp
+  ON messages(session_id, cwd, timestamp)
+  WHERE cwd IS NOT NULL AND cwd != '';
 CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_main_timeline

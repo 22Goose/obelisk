@@ -6,7 +6,7 @@
 // transactions; this module owns the invariants that must not diverge between
 // the two indexing modes.
 
-import { inferProjectPath } from './parsing.ts';
+import { inferProjectPathFromCounts } from './parsing.ts';
 import type { SqliteDb, SqliteRow } from './sqlite-types.ts';
 
 const FTS_TRIGGERS_READY_MARKER = '__fts_triggers_ready__';
@@ -76,15 +76,21 @@ export function refreshSessionProjectPaths(
   }
 
   const cwdStmt = db.prepare(`
-    SELECT cwd
-    FROM messages
-    WHERE session_id = ? AND cwd IS NOT NULL AND cwd != ''
-    ORDER BY timestamp IS NULL, timestamp
+    SELECT m.cwd, COUNT(*) AS count
+    FROM messages AS m
+    WHERE m.session_id = ? AND m.cwd IS NOT NULL AND m.cwd != ''
+    GROUP BY m.cwd
+    ORDER BY MIN(m.timestamp) IS NULL, MIN(m.timestamp),
+      (SELECT first.rowid FROM messages AS first
+       WHERE first.session_id = m.session_id AND first.cwd = m.cwd
+       ORDER BY first.timestamp IS NULL, first.timestamp, first.rowid LIMIT 1)
   `);
   const update = db.prepare('UPDATE sessions SET project_path = ? WHERE id = ?');
   for (const session of sessions) {
-    const cwds = cwdStmt.all(session.id).map((row: SqliteRow) => row.cwd);
-    const projectPath = inferProjectPath(session.project, cwds);
+    const projectPath = inferProjectPathFromCounts(
+      session.project,
+      cwdStmt.all(session.id).map((row: SqliteRow) => ({ cwd: row.cwd, count: Number(row.count) })),
+    );
     if (projectPath) update.run(projectPath, session.id);
   }
 }

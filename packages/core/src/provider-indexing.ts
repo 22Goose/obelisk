@@ -370,6 +370,7 @@ export function indexProviderPlan({
   plan,
   runTransaction,
   onPersisted = () => {},
+  onBatchPersisted = () => {},
   onCommitted = () => {},
   onError,
 }: {
@@ -378,6 +379,8 @@ export function indexProviderPlan({
   runTransaction: <T>(label: string, work: () => T) => T;
   /** Runs after persist but inside the same transaction, before its commit. */
   onPersisted?: (item: ProviderIndexItem, cursor: Cursor) => void;
+  /** Runs once after all units in an atomic batch have persisted, before commit. */
+  onBatchPersisted?: (items: readonly ProviderIndexItem[]) => void;
   onCommitted?: (item: ProviderIndexItem, cursor: Cursor) => void;
   onError: (error: unknown, item: ProviderIndexItem) => 'skip' | 'stop';
 }): ProviderIndexResult {
@@ -415,7 +418,7 @@ export function indexProviderPlan({
           for (const key of keysToReplay) scheduleReplay.run(key);
           writePendingMarkers(db, plan);
         }
-        return batch.map(item => {
+        const nextCursors = batch.map(item => {
           active = item;
           for (const required of item.unit.requiresCursors ?? []) {
             if (storedProviderCursor(db, required.key) !== required.cursor) {
@@ -426,6 +429,8 @@ export function indexProviderPlan({
           onPersisted(item, nextCursor);
           return nextCursor;
         });
+        onBatchPersisted(batch);
+        return nextCursors;
       });
     } catch (error) {
       for (const item of batch) {
