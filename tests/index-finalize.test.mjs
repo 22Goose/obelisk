@@ -15,6 +15,8 @@ import {
   refreshSessionProjectPaths,
 } from '../packages/core/src/index-finalize.ts';
 import { persist } from '../packages/core/src/persist.ts';
+import { indexProviderPlan } from '../packages/core/src/provider-indexing.ts';
+import { nodeSqliteTransactionAdapter, runWriteTransaction } from '../packages/core/src/tx.ts';
 import { runCli } from './cli-test-helpers.mjs';
 import { makeTempDir } from './temp-dirs.mjs';
 
@@ -123,6 +125,89 @@ test('project-path inference normalizes, filters, counts, and orders cwd observa
   refreshSessionProjectPaths(db, new Set(['matrix']));
 
   assert.equal(sessionProjectPath(db, 'matrix'), normalize('/repo/app'));
+  db.close();
+});
+
+test('a long affected session returns only distinct cwd rows across the database seam', () => {
+  const db = freshDb();
+  insertPathSession(db, 'long', '-work-long', null);
+  db.exec('BEGIN');
+  for (let i = 0; i < 2000; i++) insertCwd(db, 'long', i, '/work/long');
+  insertCwd(db, 'long', 2000, '/work/other', '2026-08-30T00:00:00Z');
+  db.exec('COMMIT');
+
+  let returnedRows = 0;
+  const observedDb = {
+    prepare(sql) {
+      const statement = db.prepare(sql);
+      if (!sql.includes('FROM messages AS m')) return statement;
+      assert.ok(
+        db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all('long')
+          .some(row => row.detail.includes('COVERING INDEX idx_messages_session_cwd_timestamp')),
+      );
+      return {
+        all(...bindings) {
+          const rows = statement.all(...bindings);
+          returnedRows += rows.length;
+          return rows;
+        },
+      };
+    },
+  };
+  refreshSessionProjectPaths(observedDb, new Set(['long']));
+  assert.equal(returnedRows, 2);
+  assert.equal(sessionProjectPath(db, 'long'), normalize('/work/long'));
+  db.close();
+});
+
+test('normalized cwd variants combine counts and equal timestamps break ties by first row', () => {
+  const db = freshDb();
+  insertPathSession(db, 'variants', '-work-legacy', null);
+  insertCwd(db, 'variants', 1, '/work/first', '2026-08-31T00:00:01Z');
+  insertCwd(db, 'variants', 2, '/work/other', '2026-08-31T00:00:01Z');
+  insertCwd(db, 'variants', 3, '/work/first/../first', '2026-08-31T00:00:02Z');
+  insertCwd(db, 'variants', 4, '/work/other', '2026-08-31T00:00:03Z');
+
+  refreshSessionProjectPaths(db, new Set(['variants']));
+  assert.equal(sessionProjectPath(db, 'variants'), normalize('/work/first'));
+  db.close();
+});
+
+test('one atomic batch refreshes a canonical session once and rolls back on failure', () => {
+  const db = freshDb();
+  const units = ['first', 'second'].map(key => ({
+    ...PERSIST_UNIT, key: `/source/${key}.jsonl`, atomicGroup: 'shared',
+  }));
+  const provider = { name: 'test', parse: () => sessionRecords('same-message') };
+  const plan = {
+    items: units.map(unit => ({ unit, provider, cursor: null })),
+    pendingMarkers: new Map(), replayKeys: new Map(), incompleteProviders: new Set(),
+  };
+  let queries = 0;
+  const observedDb = {
+    prepare(sql) {
+      if (sql.includes('FROM messages AS m')) queries++;
+      return db.prepare(sql);
+    },
+    exec: sql => db.exec(sql),
+  };
+  const run = fail => indexProviderPlan({
+    db: observedDb,
+    plan,
+    runTransaction: (_label, work) => runWriteTransaction(nodeSqliteTransactionAdapter(db), work),
+    onBatchPersisted: batch => {
+      refreshSessionProjectPaths(observedDb, new Set(batch.map(({ unit }) => unit.sessionId)));
+      if (fail) throw new Error('refresh failed');
+    },
+    onError: () => 'skip',
+  });
+
+  assert.equal(run(true).failedItems.length, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count, 0);
+  queries = 0;
+  assert.equal(run(false).committed.length, 2);
+  assert.equal(queries, 1);
+  assert.equal(sessionProjectPath(db, PERSIST_UNIT.sessionId), normalize('/work/persisted'));
   db.close();
 });
 

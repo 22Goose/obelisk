@@ -189,12 +189,19 @@ function projectSlugFromPath(projectPath: string | null): string | null {
 }
 
 function inferProjectPath(project: string | null | undefined, observedCwds: unknown[] = []): string | null {
+  return inferProjectPathFromCounts(project, observedCwds.map(cwd => ({ cwd, count: 1 })));
+}
+
+function inferProjectPathFromCounts(
+  project: string | null | undefined,
+  observedCwds: Iterable<{ cwd: unknown; count: number }>,
+): string | null {
   const byPath = new Map<string, { path: string; count: number; first: number }>();
-  for (const cwd of observedCwds) {
+  for (const { cwd, count } of observedCwds) {
     const normalized = normalizeObservedCwd(cwd);
     if (!normalized) continue;
     const current = byPath.get(normalized) || { path: normalized, count: 0, first: byPath.size };
-    current.count++;
+    current.count += count;
     byPath.set(normalized, current);
   }
   const best = [...byPath.values()].sort((a, b) => b.count - a.count || a.first - b.first)[0];
@@ -434,7 +441,7 @@ function codexToolOutput(payload: JsonRecord): string | null {
 export {
   CLAUDE_DIR, CODEX_DIR, PROJECTS_DIR, CODEX_SESSIONS_DIR, TEXT_LIMIT,
   trunc, truncJson, extractText, extractContentType, extractMessageIsMeta, isSkillInstructions, filePath, isDir, readLines,
-  legacyProjectPathFromSlug, normalizeObservedCwd, projectSlugFromPath, inferProjectPath,
+  legacyProjectPathFromSlug, normalizeObservedCwd, projectSlugFromPath, inferProjectPath, inferProjectPathFromCounts,
   discoverJsonlFiles, discoverCodexJsonlFiles, sourceInventoryIssue,
   codexDbId, codexRawId, codexLineUuid, codexCallId, codexParentThreadId, codexIsGuardianThread,
   readCodexGuardianThreadInfo, codexAgentNickname, codexAgentRole, parseCodexJsonInput,

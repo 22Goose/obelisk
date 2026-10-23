@@ -308,11 +308,11 @@ function buildIndex({ force = false, ignoreRecentBuild = false, ignoreDaemonOwne
         db,
         plan: providerPlan,
         runTransaction: (label, work) => runRetryableWriteTransaction(txDb, work, { label }),
-        onPersisted: ({ unit }) => {
-          refreshSessionProjectPaths(db, new Set([
+        onBatchPersisted: batch => {
+          refreshSessionProjectPaths(db, new Set(batch.flatMap(({ unit }) => [
             unit.sessionId,
             ...(unit.retractSessionIds ?? []),
-          ]));
+          ])));
         },
         onError: (error, { provider, unit }) => {
           if (isBeginBusyFailure(error)) return 'stop';
